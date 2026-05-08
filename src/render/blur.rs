@@ -9,13 +9,18 @@ use smithay::output::Output;
 use smithay::utils::{Buffer, Physical, Rectangle, Size, Transform};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use super::OutputRenderElements;
 
 static BLUR_DOWN_SRC: &str = include_str!("../shaders/blur_down.glsl");
 static BLUR_UP_SRC: &str = include_str!("../shaders/blur_up.glsl");
 
-fn hash_background_elements(elements: &[OutputRenderElements], window_rect: Rectangle<i32, Physical>) -> u64 {
+fn hash_background_elements(
+    elements: &[OutputRenderElements],
+    window_rect: Rectangle<i32, Physical>,
+    region_rects: Option<&[Rectangle<i32, Physical>]>,
+) -> u64 {
     let mut hasher = DefaultHasher::new();
     elements.len().hash(&mut hasher);
     for elem in elements {
@@ -25,6 +30,17 @@ fn hash_background_elements(elements: &[OutputRenderElements], window_rect: Rect
     window_rect.loc.y.hash(&mut hasher);
     window_rect.size.w.hash(&mut hasher);
     window_rect.size.h.hash(&mut hasher);
+    // Hash by content, not Arc identity — a fresh Arc with identical rects
+    // shouldn't invalidate the cache.
+    if let Some(rects) = region_rects {
+        rects.len().hash(&mut hasher);
+        for r in rects {
+            r.loc.x.hash(&mut hasher);
+            r.loc.y.hash(&mut hasher);
+            r.size.w.hash(&mut hasher);
+            r.size.h.hash(&mut hasher);
+        }
+    }
     hasher.finish()
 }
 
@@ -215,6 +231,11 @@ pub(crate) struct BlurRequestData {
     pub elem_start: usize,
     pub elem_count: usize,
     pub layer: BlurLayer,
+    /// Client-requested blur region in mask-local physical coords (origin at
+    /// `screen_rect.loc`). `None` = whole-window blur (no client region set).
+    /// Empty list = client opted out (handled at the trigger site, never
+    /// constructed here).
+    pub region_rects: Option<Arc<Vec<Rectangle<i32, Physical>>>>,
 }
 
 /// Process blur requests: for each blurred window, render behind-content to FBO,
@@ -295,7 +316,11 @@ pub(crate) fn process_blur_requests(
             cache.resize(renderer, win_size);
         }
 
-        let bg_hash = hash_background_elements(&all_elements[behind_starts[i]..], req.screen_rect);
+        let bg_hash = hash_background_elements(
+            &all_elements[behind_starts[i]..],
+            req.screen_rect,
+            req.region_rects.as_deref().map(|v| v.as_slice()),
+        );
         let background_changed = cache.last_background_hash != bg_hash;
         let geom_changed = cache.last_geometry_generation != geom_gen;
         let camera_dirty = matches!(req.layer, BlurLayer::Overlay | BlurLayer::Top)
@@ -412,21 +437,30 @@ pub(crate) fn process_blur_requests(
 
         let Some(cache) = state.render.blur_cache.get_mut(&req.surface_id) else { continue };
 
-        // Crop surface region into cache.mask
+        // Crop surface region into cache.mask. When the client provided a
+        // blur region, restrict the blit to those rects via the damage
+        // parameter (GLES backend implements it as glScissor). The clear
+        // above leaves outside-region pixels at alpha=0; the alpha-multiply
+        // pass below then zeros blur there.
+        let whole_mask = [Rectangle::from_size(win_size)];
         {
             let bg_src = bg_tex.clone();
             let Ok(mut target) = renderer.bind(&mut cache.mask) else { continue };
             let Ok(mut frame) = renderer.render(&mut target, win_size, Transform::Normal) else { continue };
-            let _ = frame.clear(Color32F::TRANSPARENT, &[Rectangle::from_size(win_size)]);
+            let _ = frame.clear(Color32F::TRANSPARENT, &whole_mask);
             let src_rect: Rectangle<f64, smithay::utils::Buffer> = Rectangle::new(
                 (req.screen_rect.loc.x as f64, req.screen_rect.loc.y as f64).into(),
                 (win_size.w as f64, win_size.h as f64).into(),
             );
+            let damage: &[Rectangle<i32, Physical>] = match &req.region_rects {
+                Some(rects) => rects.as_slice(),
+                None => &whole_mask,
+            };
             let _ = frame.render_texture_from_to(
                 &bg_src,
                 src_rect,
                 Rectangle::from_size(win_size),
-                &[Rectangle::from_size(win_size)],
+                damage,
                 &[],
                 Transform::Normal,
                 1.0,

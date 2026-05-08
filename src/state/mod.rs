@@ -61,6 +61,7 @@ use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
+use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_foreign::XdgForeignState;
 
@@ -354,6 +355,8 @@ pub struct DriftWm {
     pub image_copy_capture_state: driftwm::protocols::image_copy_capture::ImageCopyCaptureState,
     pub pending_captures: Vec<driftwm::protocols::image_copy_capture::PendingCapture>,
     pub xdg_foreign_state: XdgForeignState,
+    #[allow(dead_code)]
+    pub background_effect_state: BackgroundEffectState,
     pub session_lock_manager_state: SessionLockManagerState,
     pub session_lock: SessionLock,
     // -- per-output: lock surface (one per output in multi-monitor) --

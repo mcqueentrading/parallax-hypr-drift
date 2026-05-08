@@ -382,23 +382,67 @@ fn build_layer_elements(
 
         if let Some((config, blur_enabled, layer_tag)) = blur_config
             && blur_enabled
-            && config.resolve_window_rules(surface.namespace(), "").is_some_and(|r| r.blur)
         {
-            // Skip the request when the surface has no render elements yet
-            // (e.g., layer surface mapped but client hasn't attached its first
-            // buffer). Otherwise the mask pass renders zero elements into
-            // bg_tex, leaving alpha=0, and the alpha-multiply blend zeros the
-            // blur out — visible as missing blur on first frame.
-            let elem_count = elements.len() - elem_start;
-            if elem_count > 0 {
-                let screen_rect = geo.to_physical_precise_round(output_scale);
-                blur_requests.push(BlurRequestData {
-                    surface_id: surface.wl_surface().id(),
-                    screen_rect,
-                    elem_start,
-                    elem_count,
-                    layer: layer_tag,
-                });
+            let rule_blur = config
+                .resolve_window_rules(surface.namespace(), "")
+                .is_some_and(|r| r.blur);
+            let client_blur_rects = with_states(surface.wl_surface(), |s| {
+                crate::handlers::background_effect::get_cached_blur_region(s)
+            });
+            let client_blur = client_blur_rects.as_ref().is_some_and(|r| !r.is_empty());
+
+            if rule_blur || client_blur {
+                // Skip the request when the surface has no render elements yet
+                // (e.g., layer surface mapped but client hasn't attached its first
+                // buffer). Otherwise the mask pass renders zero elements into
+                // bg_tex, leaving alpha=0, and the alpha-multiply blend zeros the
+                // blur out — visible as missing blur on first frame.
+                let elem_count = elements.len() - elem_start;
+                if elem_count > 0 {
+                    let screen_rect = geo.to_physical_precise_round(output_scale);
+
+                    // Layer-shell: composite_scale = output_scale (no zoom — layers
+                    // are screen-anchored). Surface origin = screen_rect.loc, so no
+                    // additional offset within the mask.
+                    let region_rects = if client_blur {
+                        let rects = client_blur_rects.as_ref().unwrap();
+                        let win_bounds: Rectangle<i32, Physical> =
+                            Rectangle::from_size(screen_rect.size);
+                        let mut out: Vec<Rectangle<i32, Physical>> =
+                            Vec::with_capacity(rects.len());
+                        for r in rects.iter() {
+                            let x1 = (r.loc.x as f64 * output_scale).round() as i32;
+                            let y1 = (r.loc.y as f64 * output_scale).round() as i32;
+                            let x2 = ((r.loc.x + r.size.w) as f64 * output_scale).round() as i32;
+                            let y2 = ((r.loc.y + r.size.h) as f64 * output_scale).round() as i32;
+                            let phys: Rectangle<i32, Physical> =
+                                Rectangle::from_extremities((x1, y1), (x2, y2));
+                            if let Some(clipped) = phys.intersection(win_bounds) {
+                                out.push(clipped);
+                            }
+                        }
+                        if out.is_empty() { None } else { Some(std::sync::Arc::new(out)) }
+                    } else {
+                        None
+                    };
+
+                    // All client rects clipped out and no rule asked for blur →
+                    // skip. region_rects=None would otherwise mean whole-window
+                    // blur, contradicting the client's specific (off-window)
+                    // request.
+                    let skip_clipped_out = client_blur && region_rects.is_none() && !rule_blur;
+
+                    if !skip_clipped_out {
+                        blur_requests.push(BlurRequestData {
+                            surface_id: surface.wl_surface().id(),
+                            screen_rect,
+                            elem_start,
+                            elem_count,
+                            layer: layer_tag,
+                            region_rects,
+                        });
+                    }
+                }
             }
         }
     }
@@ -740,7 +784,13 @@ pub fn compose_frame(
         ));
         let applied = driftwm::config::applied_rule(&wl_surface);
         let is_widget = applied.as_ref().is_some_and(|r| r.widget);
-        let wants_blur = blur_enabled && applied.as_ref().is_some_and(|r| r.blur);
+        let client_blur_rects = with_states(&wl_surface, |s| {
+            crate::handlers::background_effect::get_cached_blur_region(s)
+        });
+        // Empty rect list = client explicitly opted out → treat as off.
+        let client_blur = client_blur_rects.as_ref().is_some_and(|r| !r.is_empty());
+        let wants_blur =
+            blur_enabled && (applied.as_ref().is_some_and(|r| r.blur) || client_blur);
         let opacity = applied.as_ref().and_then(|r| r.opacity).unwrap_or(1.0);
 
         // Split elements: toplevel + subsurfaces get corner-clipped, popups
@@ -950,13 +1000,59 @@ pub fn compose_frame(
                 },
                 screen_size,
             ).to_physical_precise_round(output_scale);
-            blur_requests.push(BlurRequestData {
-                surface_id: wl_surface.id(),
-                screen_rect,
-                elem_start,
-                elem_count,
-                layer: if is_widget { BlurLayer::Widget } else { BlurLayer::Normal },
-            });
+
+            // Convert client-requested blur region from surface-local Logical to
+            // mask-local Physical (origin at screen_rect.loc). Composite scale =
+            // zoom × output_scale (matches the screen_rect derivation above).
+            // Offset accounts for where the wl_surface (0,0) lands in the mask:
+            //   SSD: (0, TITLE_BAR_HEIGHT) — title bar shifts mask up
+            //   CSD: -geo.loc — screen_rect is anchored at geometry, not surface
+            let region_rects = if client_blur {
+                let rects = client_blur_rects.as_ref().unwrap();
+                let composite_scale = zoom * output_scale;
+                let (offset_x, offset_y): (f64, f64) = if has_ssd {
+                    (0.0, driftwm::config::DecorationConfig::TITLE_BAR_HEIGHT as f64)
+                } else {
+                    let geo = window.geometry();
+                    (-geo.loc.x as f64, -geo.loc.y as f64)
+                };
+                let win_bounds: Rectangle<i32, Physical> =
+                    Rectangle::from_size(screen_rect.size);
+                let mut out: Vec<Rectangle<i32, Physical>> = Vec::with_capacity(rects.len());
+                for r in rects.iter() {
+                    let x1 = ((r.loc.x as f64 + offset_x) * composite_scale).round() as i32;
+                    let y1 = ((r.loc.y as f64 + offset_y) * composite_scale).round() as i32;
+                    let x2 = (((r.loc.x + r.size.w) as f64 + offset_x) * composite_scale).round() as i32;
+                    let y2 = (((r.loc.y + r.size.h) as f64 + offset_y) * composite_scale).round() as i32;
+                    let phys: Rectangle<i32, Physical> =
+                        Rectangle::from_extremities((x1, y1), (x2, y2));
+                    if let Some(clipped) = phys.intersection(win_bounds) {
+                        out.push(clipped);
+                    }
+                }
+                if out.is_empty() { None } else { Some(std::sync::Arc::new(out)) }
+            } else {
+                None
+            };
+
+            // If all client rects clipped to nothing AND no rule asked for blur,
+            // skip the request entirely. region_rects=None would otherwise be
+            // interpreted as whole-window blur — wrong, because the client
+            // explicitly asked for specific regions (which happen to land outside
+            // the window).
+            let rule_blur = applied.as_ref().is_some_and(|r| r.blur);
+            let skip_clipped_out = client_blur && region_rects.is_none() && !rule_blur;
+
+            if !skip_clipped_out {
+                blur_requests.push(BlurRequestData {
+                    surface_id: wl_surface.id(),
+                    screen_rect,
+                    elem_start,
+                    elem_count,
+                    layer: if is_widget { BlurLayer::Widget } else { BlurLayer::Normal },
+                    region_rects,
+                });
+            }
         }
     }
 

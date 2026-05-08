@@ -133,6 +133,8 @@ impl DriftWm {
             use smithay::wayland::shell::xdg::dialog::XdgDialogState;
             XdgDialogState::new::<Self>(&dh);
         }
+        let background_effect_state =
+            smithay::wayland::background_effect::BackgroundEffectState::new::<Self>(&dh);
 
         let config = Config::load();
 
@@ -206,6 +208,7 @@ impl DriftWm {
             image_copy_capture_state,
             pending_captures: Vec::new(),
             xdg_foreign_state,
+            background_effect_state,
             session_lock_manager_state,
             session_lock: SessionLock::Unlocked,
             lock_surfaces: HashMap::new(),

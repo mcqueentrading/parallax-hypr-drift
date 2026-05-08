@@ -3,6 +3,7 @@ mod decorations;
 mod grabs;
 mod handlers;
 mod input;
+mod region;
 mod render;
 mod signals;
 mod state;
