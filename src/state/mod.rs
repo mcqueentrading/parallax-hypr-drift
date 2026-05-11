@@ -172,6 +172,14 @@ pub struct PendingRecenter {
     pub pre_exit_size: Size<i32, Logical>,
 }
 
+/// Active drag-and-drop icon. `offset` accumulates `wl_surface.attach` deltas
+/// so the icon stays anchored to the client's grab point (e.g. a Firefox tab
+/// dragged from its mid-point doesn't snap to top-left of the cursor).
+pub struct DndIcon {
+    pub surface: WlSurface,
+    pub offset: Point<i32, Logical>,
+}
+
 /// Per-output viewport state, stored on each `Output` via `UserDataMap`.
 /// Wrapped in `Mutex` since `UserDataMap` requires `Sync`.
 /// Fields that are !Send (PixelShaderElement) stay on DriftWm.
@@ -299,7 +307,7 @@ pub struct DriftWm {
 
     // -- global: cursor --
     pub cursor: CursorState,
-    pub dnd_icon: Option<WlSurface>,
+    pub dnd_icon: Option<DndIcon>,
 
     // -- global: backend --
     pub backend: Option<Backend>,

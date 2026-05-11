@@ -69,16 +69,20 @@ pub fn build_cursor_elements(
         }
     };
 
-    // Drag-and-drop icon
+    // Drag-and-drop icon. `offset` is the accumulated `wl_surface.attach` delta
+    // in the icon's logical pixels — apply it before scale-conversion to physical.
     if let Some(ref icon) = state.dnd_icon
-        && icon.alive()
+        && icon.surface.alive()
     {
-        let pos: Point<i32, Physical> =
-            (physical_pos.x as i32, physical_pos.y as i32).into();
+        let pos: Point<i32, Physical> = (
+            (physical_pos.x + icon.offset.x as f64 * scale) as i32,
+            (physical_pos.y + icon.offset.y as f64 * scale) as i32,
+        )
+            .into();
         let surface_elems: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
             smithay::backend::renderer::element::surface::render_elements_from_surface_tree(
                 renderer,
-                icon,
+                &icon.surface,
                 pos,
                 Scale::from(1.0),
                 alpha,

@@ -158,6 +158,22 @@ impl CompositorHandler for DriftWm {
         // Without this, bbox_from_surface_tree() can't see any surfaces and returns 0x0.
         smithay::backend::renderer::utils::on_commit_buffer_handler::<DriftWm>(surface);
 
+        // Accumulate `wl_surface.attach` offset onto the DnD icon so it stays
+        // anchored to the client's grab point during the drag.
+        if matches!(&self.dnd_icon, Some(icon) if &icon.surface == surface) {
+            let dnd_icon = self.dnd_icon.as_mut().unwrap();
+            with_states(&dnd_icon.surface, |states| {
+                let buffer_delta = states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer_delta
+                    .take()
+                    .unwrap_or_default();
+                dnd_icon.offset += buffer_delta;
+            });
+        }
+
         // Session lock: confirm lock on first buffer commit from the lock surface
         if let crate::state::SessionLock::Pending(_) = &self.session_lock {
             let is_lock_surface = self

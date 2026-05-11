@@ -146,7 +146,7 @@ pub fn compose_frame(
     cursor_elements: Vec<OutputRenderElements>,
 ) -> Vec<OutputRenderElements> {
     // Clean up dead DnD icon (source destroyed / Esc cancelled)
-    if state.dnd_icon.as_ref().is_some_and(|s| !s.alive()) {
+    if state.dnd_icon.as_ref().is_some_and(|i| !i.surface.alive()) {
         state.dnd_icon = None;
     }
 
