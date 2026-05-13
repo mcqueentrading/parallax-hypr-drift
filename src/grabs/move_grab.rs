@@ -277,13 +277,19 @@ impl PointerGrab<DriftWm> for MoveSurfaceGrab {
             let Some(self_surface) = self.window.wl_surface().map(|s| s.into_owned()) else {
                 return;
             };
-            let (others, self_bar) =
+            let (others, self_bar, self_bw) =
                 data.snap_targets(&self_surface, &self.cluster_member_surfaces);
             let window_size = self.window.geometry().size;
-            let extent_x = window_size.w as f64;
-            let extent_y = window_size.h as f64 + self_bar as f64;
+            // Inflate self's extent by `self_bw` on each side so the snap math
+            // operates on the same visible-frame coords as `others` (which are
+            // already inflated by their own border in `window_snap_rect`).
+            // Without this, opposite-edge snap leaves `self_bw` of drift and
+            // cluster adjacency fails its `EPS=1.0` check.
+            let extent_x = window_size.w as f64 + 2.0 * self_bw as f64;
+            let extent_y = window_size.h as f64 + self_bar as f64 + 2.0 * self_bw as f64;
 
-            let visual_y = natural_y - self_bar as f64;
+            let visual_x = natural_x - self_bw as f64;
+            let visual_y = natural_y - self_bar as f64 - self_bw as f64;
 
             // Perpendicular ranges must reflect the *visual* window position,
             // not the raw cursor. When an axis is held-snapped, the cursor may
@@ -304,16 +310,16 @@ impl PointerGrab<DriftWm> for MoveSurfaceGrab {
                 break_force: effective_break,
                 same_edge: data.config.snap_same_edge,
             };
-            let final_x = update_axis(
+            let final_visual_x = update_axis(
                 &mut self.snap.x,
                 &mut self.snap.cooldown_x,
-                natural_x,
+                visual_x,
                 &params_x,
             );
 
             // X was just updated above — self.snap.x now reflects this frame's
             // state (engaged, broken, or untouched).
-            let visual_x_for_perp = self.snap.x.as_ref().map_or(natural_x, |s| s.snapped_pos);
+            let visual_x_for_perp = self.snap.x.as_ref().map_or(visual_x, |s| s.snapped_pos);
 
             let params_y = SnapParams {
                 extent: extent_y,
@@ -332,7 +338,8 @@ impl PointerGrab<DriftWm> for MoveSurfaceGrab {
                 visual_y,
                 &params_y,
             );
-            let final_y = final_visual_y + self_bar as f64;
+            let final_x = final_visual_x + self_bw as f64;
+            let final_y = final_visual_y + self_bar as f64 + self_bw as f64;
 
             (final_x, final_y)
         };

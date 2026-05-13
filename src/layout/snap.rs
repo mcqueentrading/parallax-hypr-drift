@@ -224,6 +224,11 @@ pub fn update_axis(
 ///
 /// Mutates `new_w`/`new_h` in place based on which edges are active.
 /// `edges_mask` uses the xdg_toplevel resize edge bit layout (top=1, bottom=2, left=4, right=8).
+///
+/// The dragged window's *visible* edges (raw frame ± `self_bar` / `self_bw`)
+/// are what get snapped against `others` — which are already inflated by their
+/// own border width in `window_snap_rect`. Edges are inflated on the way in,
+/// deflated on the way back to `new_w` / `new_h` (raw content size).
 #[allow(clippy::too_many_arguments)]
 pub fn snap_resize_edges(
     snap: &mut SnapState,
@@ -231,6 +236,7 @@ pub fn snap_resize_edges(
     initial_location: (i32, i32),
     initial_size: (i32, i32),
     self_bar: i32,
+    self_bw: i32,
     new_w: &mut i32,
     new_h: &mut i32,
     others: &[SnapRect],
@@ -244,34 +250,37 @@ pub fn snap_resize_edges(
     let effective_break = snap_break_force / zoom;
     let (loc_x, loc_y) = (initial_location.0 as f64, initial_location.1 as f64);
     let (init_w, init_h) = (initial_size.0 as f64, initial_size.1 as f64);
+    let bw = self_bw as f64;
 
     let has_top = edges_mask & 1 != 0;
     let has_bottom = edges_mask & 2 != 0;
     let has_left = edges_mask & 4 != 0;
     let has_right = edges_mask & 8 != 0;
 
-    // When a Y edge is already held-snapped, use the snapped visual position
+    // When a Y edge is already held-snapped, use the snapped visible position
     // instead of the natural (cursor-driven) one. Otherwise break_force drift
     // in the natural height could let the X-edge snap engage against a target
     // the window doesn't visually overlap — spurious corner snap.
+    // `snap.y.snapped_pos` stores the visible (inflated) edge after the call
+    // below, so we use it directly without further adjustment.
     let visual_top = if has_top {
         snap.y.as_ref().map_or(
-            loc_y + init_h - *new_h as f64 - self_bar as f64,
+            loc_y + init_h - *new_h as f64 - self_bar as f64 - bw,
             |s| s.snapped_pos,
         )
     } else {
-        loc_y - self_bar as f64
+        loc_y - self_bar as f64 - bw
     };
     let visual_bottom = if has_bottom {
         snap.y
             .as_ref()
-            .map_or(loc_y + *new_h as f64, |s| s.snapped_pos)
+            .map_or(loc_y + *new_h as f64 + bw, |s| s.snapped_pos)
     } else {
-        loc_y + init_h
+        loc_y + init_h + bw
     };
 
     if has_right {
-        let natural_right = loc_x + *new_w as f64;
+        let natural_right = loc_x + *new_w as f64 + bw;
         let hp = EdgeSnapParams {
             perp_low: visual_top, perp_high: visual_bottom,
             horizontal: true, same_edge, others,
@@ -279,10 +288,10 @@ pub fn snap_resize_edges(
             high_edge: true,
         };
         let snapped = update_edge(&mut snap.x, &mut snap.cooldown_x, natural_right, &hp);
-        *new_w = (snapped - loc_x) as i32;
+        *new_w = (snapped - loc_x - bw) as i32;
     } else if has_left {
         let fixed_right = loc_x + init_w;
-        let natural_left = fixed_right - *new_w as f64;
+        let natural_left = fixed_right - *new_w as f64 - bw;
         let hp = EdgeSnapParams {
             perp_low: visual_top, perp_high: visual_bottom,
             horizontal: true, same_edge, others,
@@ -290,23 +299,23 @@ pub fn snap_resize_edges(
             high_edge: false,
         };
         let snapped = update_edge(&mut snap.x, &mut snap.cooldown_x, natural_left, &hp);
-        *new_w = (fixed_right - snapped) as i32;
+        *new_w = (fixed_right - snapped - bw) as i32;
     }
 
-    // Visual X range for the Y-edge snap's perpendicular check. The X block
+    // Visible X range for the Y-edge snap's perpendicular check. The X block
     // above has already updated *new_w to reflect any X snap, so we can derive
-    // the visual range from that. A left-edge resize anchors to the right side
-    // (fixed_right), so its visual X range is NOT (loc_x, loc_x + new_w).
+    // the visible range from that. A left-edge resize anchors to the right
+    // side (fixed_right), so its visible X range is NOT (loc_x, loc_x + new_w).
     let (x_perp_low, x_perp_high) = if has_left {
-        (loc_x + init_w - *new_w as f64, loc_x + init_w)
+        (loc_x + init_w - *new_w as f64 - bw, loc_x + init_w + bw)
     } else if has_right {
-        (loc_x, loc_x + *new_w as f64)
+        (loc_x - bw, loc_x + *new_w as f64 + bw)
     } else {
-        (loc_x, loc_x + init_w)
+        (loc_x - bw, loc_x + init_w + bw)
     };
 
     if has_bottom {
-        let natural_bottom = loc_y + *new_h as f64;
+        let natural_bottom = loc_y + *new_h as f64 + bw;
         let vp = EdgeSnapParams {
             perp_low: x_perp_low, perp_high: x_perp_high,
             horizontal: false, same_edge, others,
@@ -314,10 +323,10 @@ pub fn snap_resize_edges(
             high_edge: true,
         };
         let snapped = update_edge(&mut snap.y, &mut snap.cooldown_y, natural_bottom, &vp);
-        *new_h = (snapped - loc_y) as i32;
+        *new_h = (snapped - loc_y - bw) as i32;
     } else if has_top {
         let fixed_bottom = loc_y + init_h;
-        let natural_top = fixed_bottom - *new_h as f64 - self_bar as f64;
+        let natural_top = fixed_bottom - *new_h as f64 - self_bar as f64 - bw;
         let vp = EdgeSnapParams {
             perp_low: x_perp_low, perp_high: x_perp_high,
             horizontal: false, same_edge, others,
@@ -325,7 +334,7 @@ pub fn snap_resize_edges(
             high_edge: false,
         };
         let snapped = update_edge(&mut snap.y, &mut snap.cooldown_y, natural_top, &vp);
-        *new_h = (fixed_bottom - snapped - self_bar as f64) as i32;
+        *new_h = (fixed_bottom - snapped - self_bar as f64 - bw) as i32;
     }
 
     *new_w = (*new_w).max(1);

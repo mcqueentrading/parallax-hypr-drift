@@ -199,7 +199,7 @@ impl DriftWm {
         &self,
         primary: &WlSurface,
         cluster_excludes: &HashSet<WlSurface>,
-    ) -> (Vec<driftwm::layout::snap::SnapRect>, i32) {
+    ) -> (Vec<driftwm::layout::snap::SnapRect>, i32, i32) {
         snap_targets_impl(
             &self.space,
             &self.decorations,
@@ -453,12 +453,22 @@ pub(crate) fn snap_targets_impl(
     decoration_config: &driftwm::config::DecorationConfig,
     primary: &WlSurface,
     cluster_excludes: &HashSet<WlSurface>,
-) -> (Vec<driftwm::layout::snap::SnapRect>, i32) {
+) -> (Vec<driftwm::layout::snap::SnapRect>, i32, i32) {
     let self_bar = if decorations.contains_key(&primary.id()) {
         driftwm::config::DecorationConfig::TITLE_BAR_HEIGHT
     } else {
         0
     };
+    let primary_rule = driftwm::config::applied_rule(primary);
+    let primary_mode = driftwm::config::effective_decoration_mode(
+        primary_rule.as_ref().and_then(|r| r.decoration.as_ref()),
+        &decoration_config.default_mode,
+    );
+    let self_bw = driftwm::config::effective_border_width(
+        primary_rule.as_ref(),
+        primary_mode,
+        decoration_config,
+    );
     let mut others = Vec::new();
     for w in space.elements() {
         let Some((surface, rect)) = window_snap_rect(space, decorations, decoration_config, w)
@@ -470,7 +480,7 @@ pub(crate) fn snap_targets_impl(
         }
         others.push(rect);
     }
-    (others, self_bar)
+    (others, self_bar, self_bw)
 }
 
 /// Compute the snap rectangle for a single window, returning its surface

@@ -198,7 +198,7 @@ impl PointerGrab<DriftWm> for ResizeSurfaceGrab {
             && let Some(self_surface) = self.window.wl_surface().map(|s| s.into_owned())
         {
             let zoom = output_state(&self.output).zoom;
-            let (others, self_bar) =
+            let (others, self_bar, self_bw) =
                 data.snap_targets(&self_surface, &self.cluster_resize.exclude);
 
             snap_resize_edges(
@@ -207,6 +207,7 @@ impl PointerGrab<DriftWm> for ResizeSurfaceGrab {
                 (self.initial_window_location.x, self.initial_window_location.y),
                 (self.initial_window_size.w, self.initial_window_size.h),
                 self_bar,
+                self_bw,
                 &mut new_w, &mut new_h,
                 &others, zoom,
                 data.config.snap_gap,

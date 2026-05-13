@@ -369,7 +369,7 @@ impl DriftWm {
                     // Can't call self.snap_targets() here — gesture_state is
                     // mutably borrowed by the match arm, so go through the
                     // free function on disjoint field borrows instead.
-                    let (others, self_bar) = snap_targets_impl(
+                    let (others, self_bar, self_bw) = snap_targets_impl(
                         &self.space,
                         &self.decorations,
                         &self.config.decorations,
@@ -383,6 +383,7 @@ impl DriftWm {
                         (initial_location.x, initial_location.y),
                         (initial_size.w, initial_size.h),
                         self_bar,
+                        self_bw,
                         &mut new_w,
                         &mut new_h,
                         &others,
