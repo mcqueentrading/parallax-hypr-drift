@@ -88,6 +88,14 @@ impl DriftWm {
         self.render.wallpaper_shader = None;
         self.render.cached_wallpaper_bg.clear();
 
+        // Per-window border + shadow elements bake `corner_radius` and the
+        // border color into uniforms refreshed only when the phys-key changes
+        // — neither key carries color or corner radius. Drop both caches so a
+        // user edit to `decorations.border_color*` or `decorations.corner_radius`
+        // is picked up on the next frame.
+        self.render.border_cache.clear();
+        self.render.shadow_cache.clear();
+
         // Cursor theme/size — validate theme before committing. Env vars stay
         // out of process env: child_env (rebuilt by `Config::from_raw`) carries
         // XCURSOR_* to spawned children, and the cursor loader reads from

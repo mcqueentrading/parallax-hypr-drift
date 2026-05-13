@@ -465,6 +465,7 @@ pub fn init_udev(
     {
         let mut backend = data.backend.take().unwrap();
         data.render.shadow_shader = crate::render::compile_shadow_shader(backend.renderer());
+        data.render.border_shader = crate::render::compile_border_shader(backend.renderer());
         data.render.corner_clip_shader =
             crate::render::compile_corner_clip_shader(backend.renderer());
         let (blur_down, blur_up, blur_mask) =

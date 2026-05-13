@@ -415,7 +415,7 @@ pub enum DecorationMode {
     /// SSD: compositor draws a title bar with close button, plus shadow + corner clip.
     Server,
     /// SSD: no title bar, but compositor still draws shadow + corner clip.
-    Borderless,
+    Minimal,
     /// SSD: nothing at all — bare client surface, no shadow, no corner clip.
     None,
 }
@@ -548,6 +548,11 @@ pub struct WindowRule {
     pub blur: bool,
     pub opacity: Option<f64>,
     pub pass_keys: PassKeys,
+    /// Per-window border overrides. `None` means inherit the global value
+    /// (or, for `decoration = "none"`, fall through to "no border").
+    pub border_width: Option<i32>,
+    pub border_color: Option<[u8; 4]>,
+    pub border_color_focused: Option<[u8; 4]>,
 }
 
 impl WindowRule {
@@ -580,6 +585,9 @@ pub struct AppliedWindowRule {
     pub position: Option<(i32, i32)>,
     /// Explicit window size requested by the matching rule(s).
     pub size: Option<(i32, i32)>,
+    pub border_width: Option<i32>,
+    pub border_color: Option<[u8; 4]>,
+    pub border_color_focused: Option<[u8; 4]>,
 }
 
 impl AppliedWindowRule {
@@ -607,6 +615,15 @@ impl AppliedWindowRule {
         if let Some(sz) = rule.size {
             self.size = Some(sz);
         }
+        if let Some(bw) = rule.border_width {
+            self.border_width = Some(bw);
+        }
+        if let Some(bc) = rule.border_color {
+            self.border_color = Some(bc);
+        }
+        if let Some(bcf) = rule.border_color_focused {
+            self.border_color_focused = Some(bcf);
+        }
     }
 }
 
@@ -620,6 +637,9 @@ impl From<&WindowRule> for AppliedWindowRule {
             pass_keys: rule.pass_keys.clone(),
             position: rule.position,
             size: rule.size,
+            border_width: rule.border_width,
+            border_color: rule.border_color,
+            border_color_focused: rule.border_color_focused,
         }
     }
 }
@@ -680,6 +700,12 @@ pub struct DecorationConfig {
     pub corner_radius: i32,
     /// Default decoration mode for windows without a matching rule.
     pub default_mode: DecorationMode,
+    /// Border width in pixels. `0` disables the border. Applies to `client`,
+    /// `server`, and `minimal` modes; `none` opts out unless a window rule
+    /// overrides explicitly.
+    pub border_width: i32,
+    pub border_color: [u8; 4],
+    pub border_color_focused: [u8; 4],
 }
 
 impl Default for DecorationConfig {
@@ -689,8 +715,49 @@ impl Default for DecorationConfig {
             fg_color: [0xFF, 0xFF, 0xFF, 0xFF],
             corner_radius: 10,
             default_mode: DecorationMode::Client,
+            border_width: 0,
+            border_color: [0x30, 0x30, 0x30, 0xFF],
+            border_color_focused: [0x30, 0x30, 0x30, 0xFF],
         }
     }
+}
+
+/// Effective border width for a window. Per-window rule wins; otherwise fall
+/// back to the global value unless the resolved decoration mode is `None`
+/// (which opts out of the global border).
+pub fn effective_border_width(
+    applied: Option<&AppliedWindowRule>,
+    mode: &DecorationMode,
+    decorations: &DecorationConfig,
+) -> i32 {
+    if let Some(bw) = applied.and_then(|r| r.border_width) {
+        return bw;
+    }
+    match mode {
+        DecorationMode::None => 0,
+        _ => decorations.border_width,
+    }
+}
+
+/// Effective border color: per-window rule wins, else fall back to global.
+/// Mode-independent because color is only consulted when `border_width > 0`.
+pub fn effective_border_color(
+    applied: Option<&AppliedWindowRule>,
+    decorations: &DecorationConfig,
+) -> [u8; 4] {
+    applied
+        .and_then(|r| r.border_color)
+        .unwrap_or(decorations.border_color)
+}
+
+/// Effective focused-border color: per-window rule wins, else fall back to global.
+pub fn effective_border_color_focused(
+    applied: Option<&AppliedWindowRule>,
+    decorations: &DecorationConfig,
+) -> [u8; 4] {
+    applied
+        .and_then(|r| r.border_color_focused)
+        .unwrap_or(decorations.border_color_focused)
 }
 
 impl DecorationConfig {

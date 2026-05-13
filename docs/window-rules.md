@@ -83,7 +83,7 @@ Regex patterns use the `regex` crate (RE2-compatible, no backreferences).
 | -------------- | -------------------------------------------------- |
 | `"client"`     | CSD — client draws its own titlebar (default)      |
 | `"server"`     | SSD — driftwm draws a titlebar with a close button |
-| `"borderless"` | SSD — no titlebar, but shadow + corner clipping    |
+| `"minimal"`    | SSD — no titlebar, but shadow + corner clipping    |
 | `"none"`       | SSD — completely bare, no chrome at all            |
 
 ### `pass_keys` details

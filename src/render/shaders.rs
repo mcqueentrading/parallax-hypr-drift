@@ -222,6 +222,172 @@ pub(super) fn push_shadow_element(
     ));
 }
 
+const BORDER_SHADER_SRC: &str = include_str!("../shaders/border.glsl");
+
+pub(super) const BORDER_UNIFORMS: &[UniformName<'static>] = &[
+    UniformName { name: Cow::Borrowed("u_inner_rect"), type_: UniformType::_4f },
+    UniformName { name: Cow::Borrowed("u_inner_radius"), type_: UniformType::_1f },
+    UniformName { name: Cow::Borrowed("u_border_width"), type_: UniformType::_1f },
+    UniformName { name: Cow::Borrowed("u_color"), type_: UniformType::_4f },
+];
+
+pub fn compile_border_shader(renderer: &mut GlesRenderer) -> Option<GlesPixelProgram> {
+    match renderer.compile_custom_pixel_shader(BORDER_SHADER_SRC, BORDER_UNIFORMS) {
+        Ok(shader) => Some(shader),
+        Err(e) => {
+            tracing::error!("Failed to compile border shader: {e}");
+            None
+        }
+    }
+}
+
+/// Key that fully determines border element identity & geometry, in post-zoom
+/// physical pixels: `[inner_x0, inner_y0, inner_x1, inner_y1, element_x, element_y,
+/// element_w, element_h, border_width, focused_flag]`.
+pub type BorderPhysKey = [i32; 10];
+
+#[allow(clippy::too_many_arguments)]
+fn border_uniforms_precise(
+    inner_pre_zoom: Rectangle<i32, Physical>,
+    border_area: Rectangle<i32, Logical>,
+    output_scale: Scale<f64>,
+    zoom: f64,
+    inner_radius_phys: f32,
+    border_width_phys: f32,
+    color: [u8; 4],
+    focused: bool,
+) -> (Vec<Uniform<'static>>, BorderPhysKey) {
+    let zoom_scale = Scale::from(zoom);
+
+    let inner_post = corner_round_rect(inner_pre_zoom.to_f64(), zoom_scale);
+    let border_pre: Rectangle<i32, Physical> =
+        border_area.to_physical_precise_round(output_scale);
+    let border_post: Rectangle<i32, Physical> =
+        border_pre.to_f64().upscale(zoom_scale).to_i32_round();
+
+    let phys_w = border_post.size.w.max(1) as f64;
+    let phys_h = border_post.size.h.max(1) as f64;
+    let logical_w = border_area.size.w.max(1) as f64;
+    let logical_h = border_area.size.h.max(1) as f64;
+    let px = phys_w / logical_w;
+    let py = phys_h / logical_h;
+
+    let inner_x = (inner_post.loc.x - border_post.loc.x) as f64 / px;
+    let inner_y = (inner_post.loc.y - border_post.loc.y) as f64 / py;
+    let inner_w = inner_post.size.w as f64 / px;
+    let inner_h = inner_post.size.h as f64 / py;
+    let inner_r_logical = inner_radius_phys as f64 / px;
+    let border_w_logical = border_width_phys as f64 / px;
+
+    let uniforms = vec![
+        Uniform::new("u_inner_rect", (
+            inner_x as f32, inner_y as f32,
+            inner_w as f32, inner_h as f32,
+        )),
+        Uniform::new("u_inner_radius", inner_r_logical as f32),
+        Uniform::new("u_border_width", border_w_logical as f32),
+        Uniform::new("u_color", (
+            color[0] as f32 / 255.0, color[1] as f32 / 255.0,
+            color[2] as f32 / 255.0, color[3] as f32 / 255.0,
+        )),
+    ];
+
+    let key: BorderPhysKey = [
+        inner_post.loc.x, inner_post.loc.y,
+        inner_post.loc.x + inner_post.size.w, inner_post.loc.y + inner_post.size.h,
+        border_post.loc.x, border_post.loc.y,
+        border_post.size.w, border_post.size.h,
+        border_width_phys.round() as i32,
+        focused as i32,
+    ];
+
+    (uniforms, key)
+}
+
+/// Build (or reuse) a cached border `PixelShaderElement` and push it into
+/// `target` wrapped in a `RescaleRenderElement`. `inner_logical` is the
+/// content rect the border wraps; the border element extends
+/// `border_width_logical` outside it on every side.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn push_border_element(
+    target: &mut Vec<OutputRenderElements>,
+    cache: &mut std::collections::HashMap<
+        smithay::reexports::wayland_server::backend::ObjectId,
+        crate::state::BorderCacheEntry,
+    >,
+    surface_id: smithay::reexports::wayland_server::backend::ObjectId,
+    shader: &GlesPixelProgram,
+    inner_logical: Rectangle<f64, Logical>,
+    inner_radius_logical: f32,
+    border_width_logical: i32,
+    color: [u8; 4],
+    focused: bool,
+    opacity: f64,
+    output_scale: Scale<f64>,
+    zoom: f64,
+) {
+    if border_width_logical <= 0 {
+        return;
+    }
+    let bw = border_width_logical;
+    let inner_x = inner_logical.loc.x.round() as i32;
+    let inner_y = inner_logical.loc.y.round() as i32;
+    let inner_w = inner_logical.size.w.round() as i32;
+    let inner_h = inner_logical.size.h.round() as i32;
+    let border_area = Rectangle::new(
+        Point::<i32, Logical>::from((inner_x - bw, inner_y - bw)),
+        Size::<i32, Logical>::from((inner_w + 2 * bw, inner_h + 2 * bw)),
+    );
+
+    let inner_pre_zoom: Rectangle<i32, Physical> =
+        inner_logical.to_physical_precise_round(output_scale);
+    let inner_r_phys = inner_radius_logical * output_scale.x as f32 * zoom as f32;
+    let border_w_phys = bw as f32 * output_scale.x as f32 * zoom as f32;
+
+    let (fresh_uniforms, fresh_key) = border_uniforms_precise(
+        inner_pre_zoom,
+        border_area,
+        output_scale,
+        zoom,
+        inner_r_phys,
+        border_w_phys,
+        color,
+        focused,
+    );
+
+    if cache
+        .get(&surface_id)
+        .is_some_and(|(elem, _)| (elem.alpha() - opacity as f32).abs() > f32::EPSILON)
+    {
+        cache.remove(&surface_id);
+    }
+
+    let (elem, cached_key) = cache.entry(surface_id).or_insert_with(|| {
+        let elem = PixelShaderElement::new(
+            shader.clone(),
+            border_area,
+            None,
+            opacity as f32,
+            fresh_uniforms.clone(),
+            Kind::Unspecified,
+        );
+        (elem, Some(fresh_key))
+    });
+
+    if *cached_key != Some(fresh_key) {
+        *cached_key = Some(fresh_key);
+        elem.update_uniforms(fresh_uniforms);
+    }
+    elem.resize(border_area, None);
+    target.push(OutputRenderElements::Background(
+        RescaleRenderElement::from_element(
+            elem.clone(),
+            Point::<i32, Physical>::from((0, 0)),
+            zoom,
+        ),
+    ));
+}
+
 const CORNER_CLIP_SRC: &str = include_str!("../shaders/corner_clip.glsl");
 
 pub(super) const CORNER_CLIP_UNIFORMS: &[UniformName<'static>] = &[

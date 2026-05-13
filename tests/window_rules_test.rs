@@ -13,6 +13,9 @@ fn bare_rule(app_id: Option<&str>, title: Option<&str>) -> WindowRule {
         blur: false,
         opacity: None,
         pass_keys: PassKeys::None,
+        border_width: None,
+        border_color: None,
+        border_color_focused: None,
     }
 }
 
@@ -277,7 +280,7 @@ fn from_window_rule_copies_all_scalar_fields() {
         opacity: Some(0.5),
         position: Some((1, 2)),
         size: Some((800, 600)),
-        decoration: Some(DecorationMode::Borderless),
+        decoration: Some(DecorationMode::Minimal),
         pass_keys: PassKeys::All,
         ..bare_rule(Some("x"), None)
     };
@@ -287,7 +290,7 @@ fn from_window_rule_copies_all_scalar_fields() {
     assert_eq!(applied.opacity, Some(0.5));
     assert_eq!(applied.position, Some((1, 2)));
     assert_eq!(applied.size, Some((800, 600)));
-    assert_eq!(applied.decoration, Some(DecorationMode::Borderless));
+    assert_eq!(applied.decoration, Some(DecorationMode::Minimal));
     assert!(matches!(applied.pass_keys, PassKeys::All));
 }
 

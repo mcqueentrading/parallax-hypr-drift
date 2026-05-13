@@ -67,7 +67,7 @@ pub(super) fn parse_decoration_config(raw: DecorationFileConfig) -> DecorationCo
 
     let default_mode = match raw.default_mode.as_deref() {
         Some("client") | None => DecorationMode::Client,
-        Some("borderless") => DecorationMode::Borderless,
+        Some("minimal") => DecorationMode::Minimal,
         Some("none") => DecorationMode::None,
         Some("server") => {
             // Reserved for per-window rules. As a global default it's a footgun:
@@ -91,6 +91,13 @@ pub(super) fn parse_decoration_config(raw: DecorationFileConfig) -> DecorationCo
         fg_color: resolve(raw.fg_color, defaults.fg_color, "fg_color"),
         corner_radius: raw.corner_radius.unwrap_or(defaults.corner_radius).max(0),
         default_mode,
+        border_width: raw.border_width.unwrap_or(defaults.border_width).max(0),
+        border_color: resolve(raw.border_color, defaults.border_color, "border_color"),
+        border_color_focused: resolve(
+            raw.border_color_focused,
+            defaults.border_color_focused,
+            "border_color_focused",
+        ),
     }
 }
 
@@ -117,7 +124,7 @@ pub(super) fn parse_window_rule(r: WindowRuleFile, mod_key: ModKey) -> Option<Wi
     let decoration = match r.decoration.as_deref() {
         None => None,
         Some("none") => Some(DecorationMode::None),
-        Some("borderless") => Some(DecorationMode::Borderless),
+        Some("minimal") => Some(DecorationMode::Minimal),
         Some("server") => Some(DecorationMode::Server),
         Some("client") => Some(DecorationMode::Client),
         Some(other) => {
@@ -173,6 +180,21 @@ pub(super) fn parse_window_rule(r: WindowRuleFile, mod_key: ModKey) -> Option<Wi
             }
         }),
         pass_keys,
+        border_width: r.border_width.map(|bw| bw.max(0)),
+        border_color: r.border_color.and_then(|s| {
+            let parsed = parse_color(&s);
+            if parsed.is_none() {
+                tracing::warn!("Window rule border_color '{s}' invalid, ignoring");
+            }
+            parsed
+        }),
+        border_color_focused: r.border_color_focused.and_then(|s| {
+            let parsed = parse_color(&s);
+            if parsed.is_none() {
+                tracing::warn!("Window rule border_color_focused '{s}' invalid, ignoring");
+            }
+            parsed
+        }),
     })
 }
 

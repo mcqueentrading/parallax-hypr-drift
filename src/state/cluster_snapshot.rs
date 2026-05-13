@@ -200,7 +200,13 @@ impl DriftWm {
         primary: &WlSurface,
         cluster_excludes: &HashSet<WlSurface>,
     ) -> (Vec<driftwm::layout::snap::SnapRect>, i32) {
-        snap_targets_impl(&self.space, &self.decorations, primary, cluster_excludes)
+        snap_targets_impl(
+            &self.space,
+            &self.decorations,
+            &self.config.decorations,
+            primary,
+            cluster_excludes,
+        )
     }
 
     /// Every non-widget window in the space with its `SnapRect`. Used to
@@ -210,7 +216,7 @@ impl DriftWm {
         self.space
             .elements()
             .filter_map(|w| {
-                window_snap_rect(&self.space, &self.decorations, w)
+                window_snap_rect(&self.space, &self.decorations, &self.config.decorations, w)
                     .map(|(_, rect)| (w.clone(), rect))
             })
             .collect()
@@ -444,6 +450,7 @@ pub(crate) fn snap_targets_impl(
         smithay::reexports::wayland_server::backend::ObjectId,
         WindowDecoration,
     >,
+    decoration_config: &driftwm::config::DecorationConfig,
     primary: &WlSurface,
     cluster_excludes: &HashSet<WlSurface>,
 ) -> (Vec<driftwm::layout::snap::SnapRect>, i32) {
@@ -454,7 +461,8 @@ pub(crate) fn snap_targets_impl(
     };
     let mut others = Vec::new();
     for w in space.elements() {
-        let Some((surface, rect)) = window_snap_rect(space, decorations, w) else {
+        let Some((surface, rect)) = window_snap_rect(space, decorations, decoration_config, w)
+        else {
             continue;
         };
         if surface == *primary || cluster_excludes.contains(&surface) {
@@ -468,17 +476,21 @@ pub(crate) fn snap_targets_impl(
 /// Compute the snap rectangle for a single window, returning its surface
 /// alongside (needed by `snap_targets_impl` for exclusion checks). Returns
 /// `None` for widgets, unmapped windows, or anything without a `wl_surface`.
-/// Y-low includes the title-bar height for CSD-decorated windows.
+/// Y-low includes the title-bar height for SSD-decorated windows. The rect
+/// is inflated by the window's effective border_width on all four sides so
+/// snap/cluster math operates on the visible footprint.
 fn window_snap_rect(
     space: &Space<Window>,
     decorations: &HashMap<
         smithay::reexports::wayland_server::backend::ObjectId,
         WindowDecoration,
     >,
+    decoration_config: &driftwm::config::DecorationConfig,
     w: &Window,
 ) -> Option<(WlSurface, driftwm::layout::snap::SnapRect)> {
     let surface = w.wl_surface()?.into_owned();
-    if driftwm::config::applied_rule(&surface).is_some_and(|r| r.widget) {
+    let applied = driftwm::config::applied_rule(&surface);
+    if applied.as_ref().is_some_and(|r| r.widget) {
         return None;
     }
     let loc = space.element_location(w)?;
@@ -488,13 +500,19 @@ fn window_snap_rect(
     } else {
         0
     };
+    let mode = driftwm::config::effective_decoration_mode(
+        applied.as_ref().and_then(|r| r.decoration.as_ref()),
+        &decoration_config.default_mode,
+    );
+    let bw = driftwm::config::effective_border_width(applied.as_ref(), mode, decoration_config)
+        as f64;
     Some((
         surface,
         driftwm::layout::snap::SnapRect {
-            x_low: loc.x as f64,
-            x_high: loc.x as f64 + size.w as f64,
-            y_low: loc.y as f64 - bar as f64,
-            y_high: loc.y as f64 + size.h as f64,
+            x_low: loc.x as f64 - bw,
+            x_high: loc.x as f64 + size.w as f64 + bw,
+            y_low: loc.y as f64 - bar as f64 - bw,
+            y_high: loc.y as f64 + size.h as f64 + bw,
         },
     ))
 }

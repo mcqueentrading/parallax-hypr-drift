@@ -298,7 +298,7 @@ let images = xcursor::parser::parse_xcursor(&std::fs::read(path)?)?;
 ### Decorations
 
 - **`XdgDecorationState`** at `smithay::wayland::shell::xdg::decoration::XdgDecorationState`. Mode enum at `wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode` (`ServerSide`/`ClientSide`).
-- **Borderless windows**: force `Mode::ServerSide` on the toplevel — client removes its CSD. Compositor draws nothing = borderless.
+- **Minimal windows**: force `Mode::ServerSide` on the toplevel — client removes its CSD. Compositor draws no titlebar (still draws shadow + corner clip).
 
 ### Udev/DRM Backend
 

@@ -61,6 +61,7 @@ impl CompositorHandler for DriftWm {
         });
         self.render.blur_cache.remove(&id);
         self.render.shadow_cache.remove(&id);
+        self.render.border_cache.remove(&id);
         // lock_surfaces is keyed by output, not surface — sweep values.
         self.lock_surfaces.retain(|_, ls| ls.wl_surface() != surface);
     }
@@ -285,7 +286,7 @@ impl CompositorHandler for DriftWm {
                         let default = &self.config.decorations.default_mode;
                         let default_wire = crate::handlers::decoration_mode_to_wire(default);
                         // If the client accepted what we advertised, keep the
-                        // full DecorationMode (preserves Borderless / None,
+                        // full DecorationMode (preserves Minimal / None,
                         // which both map to ServerSide on the wire and would
                         // otherwise be lost in a round-trip).
                         match negotiated {
@@ -456,7 +457,7 @@ impl CompositorHandler for DriftWm {
                         // window_ssd_bar() returns the correct height. Otherwise
                         // the camera target centers the client body (ignoring the
                         // titlebar drawn above it) and drifts by bar/2.
-                        // Borderless still gets shadow + corner clip via the render
+                        // Minimal still gets shadow + corner clip via the render
                         // path; None gets nothing; Client never has a widget.
                         if effective == driftwm::config::DecorationMode::Server
                             && !self.decorations.contains_key(&root.id())

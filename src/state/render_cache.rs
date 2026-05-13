@@ -8,10 +8,12 @@ use smithay::utils::{Physical, Size};
 use super::CaptureOutputState;
 
 pub type ShadowCacheEntry = (PixelShaderElement, Option<crate::render::ShadowPhysKey>);
+pub type BorderCacheEntry = (PixelShaderElement, Option<crate::render::BorderPhysKey>);
 
 /// Cached GPU resources: compiled shaders, blur textures, background elements, capture state.
 pub struct RenderCache {
     pub shadow_shader: Option<GlesPixelProgram>,
+    pub border_shader: Option<GlesPixelProgram>,
     pub corner_clip_shader: Option<GlesTexProgram>,
     pub background_shader: Option<GlesPixelProgram>,
     pub background_is_animated: bool,
@@ -23,6 +25,7 @@ pub struct RenderCache {
     pub blur_geometry_generation: u64,
     pub blur_camera_generation: u64,
     pub shadow_cache: HashMap<ObjectId, ShadowCacheEntry>,
+    pub border_cache: HashMap<ObjectId, BorderCacheEntry>,
     pub cached_bg_elements: HashMap<String, PixelShaderElement>,
     pub capture_state: HashMap<String, CaptureOutputState>,
     pub tile_shader: Option<GlesTexProgram>,
@@ -35,6 +38,7 @@ impl RenderCache {
     pub fn new() -> Self {
         Self {
             shadow_shader: None,
+            border_shader: None,
             corner_clip_shader: None,
             background_shader: None,
             background_is_animated: false,
@@ -46,6 +50,7 @@ impl RenderCache {
             blur_geometry_generation: 0,
             blur_camera_generation: 0,
             shadow_cache: HashMap::new(),
+            border_cache: HashMap::new(),
             cached_bg_elements: HashMap::new(),
             capture_state: HashMap::new(),
             tile_shader: None,

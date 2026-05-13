@@ -174,6 +174,9 @@ pub(super) struct DecorationFileConfig {
     pub fg_color: Option<String>,
     pub corner_radius: Option<i32>,
     pub default_mode: Option<String>,
+    pub border_width: Option<i32>,
+    pub border_color: Option<String>,
+    pub border_color_focused: Option<String>,
 }
 
 /// Flexible `pass_keys` TOML value: `true`/`false` OR a list of key-combo strings.
@@ -206,6 +209,9 @@ pub(super) struct WindowRuleFile {
     /// `["mod+q", "ctrl+q"]` — forward only those combos; all others stay active.
     /// Omit or `false` — compositor handles everything normally (default).
     pub pass_keys: Option<PassKeysFile>,
+    pub border_width: Option<i32>,
+    pub border_color: Option<String>,
+    pub border_color_focused: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

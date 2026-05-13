@@ -372,6 +372,7 @@ impl DriftWm {
                     let (others, self_bar) = snap_targets_impl(
                         &self.space,
                         &self.decorations,
+                        &self.config.decorations,
                         &self_surface,
                         &cluster_resize.exclude,
                     );

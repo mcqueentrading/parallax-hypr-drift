@@ -14,7 +14,7 @@ pub(crate) use cluster_snapshot::snap_targets_impl;
 pub use cursor::{CursorFrames, CursorState};
 pub use focus::FocusTarget;
 pub use persistence::{read_all_per_output_state, remove_state_file};
-pub use render_cache::{RenderCache, ShadowCacheEntry};
+pub use render_cache::{BorderCacheEntry, RenderCache, ShadowCacheEntry};
 
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -1046,12 +1046,29 @@ impl DriftWm {
             .cloned()
     }
 
-    /// SSD title bar height for a window (0 for CSD/borderless).
+    /// SSD title bar height for a window (0 for CSD/minimal).
     pub fn window_ssd_bar(&self, window: &Window) -> i32 {
         window
             .wl_surface()
             .filter(|s| self.decorations.contains_key(&s.id()))
             .map_or(0, |_| driftwm::config::DecorationConfig::TITLE_BAR_HEIGHT)
+    }
+
+    /// Effective border width for a window, resolving per-window rule
+    /// override against the global `[decorations] border_width`. Returns 0
+    /// when the effective decoration mode is `None` and no per-window
+    /// override is set.
+    pub fn window_border_width(&self, surface: &WlSurface) -> i32 {
+        let applied = driftwm::config::applied_rule(surface);
+        let mode = driftwm::config::effective_decoration_mode(
+            applied.as_ref().and_then(|r| r.decoration.as_ref()),
+            &self.config.decorations.default_mode,
+        );
+        driftwm::config::effective_border_width(
+            applied.as_ref(),
+            mode,
+            &self.config.decorations,
+        )
     }
 
     /// Visual center of a window, accounting for SSD title bar above content.
@@ -1068,7 +1085,7 @@ impl DriftWm {
     /// Spawn position for `placement = "cursor"`: center the visual frame
     /// (titlebar + content) on the cursor, clamped to the active output's
     /// usable canvas rect so the new window is fully visible without panning.
-    /// `bar` is the SSD title-bar height (0 for CSD/borderless).
+    /// `bar` is the SSD title-bar height (0 for CSD/minimal).
     /// Returns `None` if there is no active output.
     pub fn cursor_placement_pos(
         &self,
@@ -1187,12 +1204,15 @@ impl DriftWm {
             };
             let size = w.geometry().size;
             let b = self.window_ssd_bar(w);
+            let bw = w
+                .wl_surface()
+                .map_or(0, |s| self.window_border_width(&s)) as f64;
             let idx = rects.len();
             rects.push(driftwm::layout::auto_placement::Rect {
-                x: loc.x as f64,
-                y: (loc.y - b) as f64,
-                w: size.w as f64,
-                h: (size.h + b) as f64,
+                x: loc.x as f64 - bw,
+                y: (loc.y - b) as f64 - bw,
+                w: size.w as f64 + 2.0 * bw,
+                h: (size.h + b) as f64 + 2.0 * bw,
             });
             eligible.insert(idx);
             if w == focused {
@@ -1201,8 +1221,9 @@ impl DriftWm {
         }
         let focused_idx = focused_idx?;
 
-        let new_w_f = new_size.w as f64;
-        let new_h_f = (new_size.h + bar) as f64;
+        let new_bw = self.window_border_width(&new_surface) as f64;
+        let new_w_f = new_size.w as f64 + 2.0 * new_bw;
+        let new_h_f = (new_size.h + bar) as f64 + 2.0 * new_bw;
 
         let camera = self.camera();
         let zoom = self.zoom();
@@ -1219,9 +1240,14 @@ impl DriftWm {
             self.config.snap_gap,
         )?;
 
-        // place_auto returns frame top-left (above the SSD title bar).
-        // Convert to content top-left by shifting Y down by bar.
-        Some((pos.0.round() as i32, pos.1.round() as i32 + bar))
+        // place_auto returns frame top-left (above the SSD title bar and
+        // outside the border). Shift right by border, down by border + bar
+        // to reach the content top-left.
+        let bw_i = new_bw as i32;
+        Some((
+            pos.0.round() as i32 + bw_i,
+            pos.1.round() as i32 + bw_i + bar,
+        ))
     }
 
     /// Offset a spawn position so it doesn't overlap an existing window.

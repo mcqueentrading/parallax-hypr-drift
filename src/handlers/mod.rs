@@ -567,6 +567,7 @@ impl XdgDecorationHandler for DriftWm {
             self.pending_ssd.remove(&wl_surface.id());
             self.decorations.remove(&wl_surface.id());
             self.render.shadow_cache.remove(&wl_surface.id());
+            self.render.border_cache.remove(&wl_surface.id());
         }
     }
 

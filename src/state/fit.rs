@@ -25,16 +25,23 @@ pub struct FitState(pub Option<Size<i32, Logical>>);
 /// reported size never leaks in.
 pub struct RestoreSize(pub Size<i32, Logical>);
 
-/// Build a `SnapRect` from a hypothetical canvas position, size, and SSD
-/// bar — used by `fit_window_snapped` / `unfit_window_snapped` to compute
-/// exact per-edge deltas from the primary's pre-op and post-op geometry
-/// without having to round-trip through `all_windows_with_snap_rects`.
-fn snap_rect_at(loc: Point<i32, Logical>, size: Size<i32, Logical>, bar: i32) -> driftwm::layout::snap::SnapRect {
+/// Build a `SnapRect` from a hypothetical canvas position, size, SSD
+/// bar, and border width — used by `fit_window_snapped` /
+/// `unfit_window_snapped` to compute exact per-edge deltas from the
+/// primary's pre-op and post-op geometry without round-tripping through
+/// `all_windows_with_snap_rects`.
+fn snap_rect_at(
+    loc: Point<i32, Logical>,
+    size: Size<i32, Logical>,
+    bar: i32,
+    border_width: i32,
+) -> driftwm::layout::snap::SnapRect {
+    let bw = border_width as f64;
     driftwm::layout::snap::SnapRect {
-        x_low: loc.x as f64,
-        x_high: (loc.x + size.w) as f64,
-        y_low: (loc.y - bar) as f64,
-        y_high: (loc.y + size.h) as f64,
+        x_low: loc.x as f64 - bw,
+        x_high: (loc.x + size.w) as f64 + bw,
+        y_low: (loc.y - bar) as f64 - bw,
+        y_high: (loc.y + size.h) as f64 + bw,
     }
 }
 
@@ -291,9 +298,10 @@ impl DriftWm {
         let Some(old_loc) = self.space.element_location(window) else { return };
         let old_size = restore_size(&wl_surface).unwrap_or_else(|| window.geometry().size);
         let bar = self.window_ssd_bar(window);
+        let bw = self.window_border_width(&wl_surface);
         let fit = self.compute_fit_geometry(window);
-        let old_rect = snap_rect_at(old_loc, old_size, bar);
-        let new_rect = snap_rect_at(fit.new_loc, fit.target_size, bar);
+        let old_rect = snap_rect_at(old_loc, old_size, bar, bw);
+        let new_rect = snap_rect_at(fit.new_loc, fit.target_size, bar, bw);
         self.shift_cluster_around_primary(window, old_rect, new_rect);
         self.fit_window(window);
     }
@@ -311,6 +319,7 @@ impl DriftWm {
         let Some(old_loc) = self.space.element_location(window) else { return };
         let old_size = window.geometry().size;
         let bar = self.window_ssd_bar(window);
+        let bw = self.window_border_width(&wl_surface);
         // Mirror unfit_window's new_loc computation so per-edge deltas match.
         let center = self.window_visual_center(window).unwrap_or_default();
         let total_h = saved_size.h + bar;
@@ -318,8 +327,8 @@ impl DriftWm {
             (center.x - saved_size.w as f64 / 2.0) as i32,
             (center.y - total_h as f64 / 2.0) as i32 + bar,
         ));
-        let old_rect = snap_rect_at(old_loc, old_size, bar);
-        let new_rect = snap_rect_at(new_loc, saved_size, bar);
+        let old_rect = snap_rect_at(old_loc, old_size, bar, bw);
+        let new_rect = snap_rect_at(new_loc, saved_size, bar, bw);
         self.shift_cluster_around_primary(window, old_rect, new_rect);
         self.unfit_window(window);
     }

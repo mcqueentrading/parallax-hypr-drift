@@ -19,11 +19,14 @@ pub use lifecycle::{
     post_render, refresh_foreign_toplevels, take_presentation_feedback,
     update_primary_scanout_output,
 };
-pub use shaders::{ShadowPhysKey, compile_corner_clip_shader, compile_shadow_shader};
+pub use shaders::{
+    BorderPhysKey, ShadowPhysKey, compile_border_shader, compile_corner_clip_shader,
+    compile_shadow_shader,
+};
 
 use blur::{BlurLayer, BlurRequestData, process_blur_requests};
 use layers::{build_canvas_layer_elements, build_layer_elements};
-use shaders::push_shadow_element;
+use shaders::{push_border_element, push_shadow_element};
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{
@@ -203,6 +206,34 @@ pub fn compose_frame(
         let is_fullscreen = state.fullscreen.values().any(|fs| &fs.window == window);
         let has_ssd = !is_fullscreen && state.decorations.contains_key(&wl_surface.id());
 
+        let applied = driftwm::config::applied_rule(&wl_surface);
+        let is_widget = applied.as_ref().is_some_and(|r| r.widget);
+        let is_focused = focused_surface.as_ref().is_some_and(|f| *f == *wl_surface);
+        let effective_mode = driftwm::config::effective_decoration_mode(
+            applied.as_ref().and_then(|r| r.decoration.as_ref()),
+            &state.config.decorations.default_mode,
+        );
+        let effective_bw = if is_fullscreen {
+            0
+        } else {
+            driftwm::config::effective_border_width(
+                applied.as_ref(),
+                effective_mode,
+                &state.config.decorations,
+            )
+        };
+        let border_color = if is_focused {
+            driftwm::config::effective_border_color_focused(
+                applied.as_ref(),
+                &state.config.decorations,
+            )
+        } else {
+            driftwm::config::effective_border_color(
+                applied.as_ref(),
+                &state.config.decorations,
+            )
+        };
+
         let mut bbox = window.bbox();
         bbox.loc += loc - geom_loc;
         if has_ssd {
@@ -213,14 +244,18 @@ pub fn compose_frame(
             bbox.size.w += 2 * r;
             bbox.size.h += bar + 2 * r;
         }
+        if effective_bw > 0 {
+            bbox.loc.x -= effective_bw;
+            bbox.loc.y -= effective_bw;
+            bbox.size.w += 2 * effective_bw;
+            bbox.size.h += 2 * effective_bw;
+        }
         if !visible_rect.overlaps(bbox) { continue }
 
         let render_loc: Point<f64, Logical> = Point::from((
             loc.x as f64 - geom_loc.x as f64 - camera.x,
             loc.y as f64 - geom_loc.y as f64 - camera.y,
         ));
-        let applied = driftwm::config::applied_rule(&wl_surface);
-        let is_widget = applied.as_ref().is_some_and(|r| r.widget);
         let client_blur_rects = with_states(&wl_surface, |s| {
             crate::handlers::background_effect::get_cached_blur_region(s)
         });
@@ -269,7 +304,6 @@ pub fn compose_frame(
 
         if has_ssd {
             let bar_height = driftwm::config::DecorationConfig::TITLE_BAR_HEIGHT;
-            let is_focused = focused_surface.as_ref().is_some_and(|f| *f == *wl_surface);
 
             // Update decoration state (re-render title bar if needed)
             if let Some(deco) = state.decorations.get_mut(&wl_surface.id()) {
@@ -327,12 +361,45 @@ pub fn compose_frame(
                 push_plain_elements(target, elems, zoom);
             }
 
-            // Shadow encloses title bar + content; cached per-surface so the
-            // damage tracker can skip unchanged regions across frames.
-            if let Some(shader) = state.render.shadow_shader.clone() {
-                let body_logical: Rectangle<f64, Logical> = Rectangle::new(
+            // Border wraps title bar + content, drawn between window content
+            // and shadow so it sits visually outside the rounded corner mask.
+            if effective_bw > 0
+                && let Some(shader) = state.render.border_shader.clone()
+            {
+                let inner_logical: Rectangle<f64, Logical> = Rectangle::new(
                     (render_loc.x, render_loc.y - bar_height as f64).into(),
                     (geom_size.w as f64, (geom_size.h + bar_height) as f64).into(),
+                );
+                push_border_element(
+                    target,
+                    &mut state.render.border_cache,
+                    wl_surface.id(),
+                    &shader,
+                    inner_logical,
+                    state.config.decorations.corner_radius as f32,
+                    effective_bw,
+                    border_color,
+                    is_focused,
+                    opacity,
+                    scale,
+                    zoom,
+                );
+            }
+
+            // Shadow encloses title bar + content + border; cached per-surface
+            // so the damage tracker can skip unchanged regions across frames.
+            // When a border is present, the shadow's footprint and corner
+            // radius both grow by border_width so the shadow grades out from
+            // the border's outer perimeter (same approach as niri).
+            if let Some(shader) = state.render.shadow_shader.clone() {
+                let bw = effective_bw as f64;
+                let body_logical: Rectangle<f64, Logical> = Rectangle::new(
+                    (render_loc.x - bw, render_loc.y - bar_height as f64 - bw).into(),
+                    (
+                        geom_size.w as f64 + 2.0 * bw,
+                        (geom_size.h + bar_height) as f64 + 2.0 * bw,
+                    )
+                        .into(),
                 );
                 push_shadow_element(
                     target,
@@ -340,7 +407,7 @@ pub fn compose_frame(
                     wl_surface.id(),
                     &shader,
                     body_logical,
-                    state.config.decorations.corner_radius as f32,
+                    (state.config.decorations.corner_radius + effective_bw) as f32,
                     opacity,
                     scale,
                     zoom,
@@ -352,7 +419,7 @@ pub fn compose_frame(
             let radius = state.config.decorations.corner_radius as f32;
 
             // Only `None` mode opts out of shadow + corner clipping.
-            // Client (CSD), Borderless, and untagged windows all get the chrome —
+            // Client (CSD), Minimal, and untagged windows all get the chrome —
             // any `Server` window would have taken the `has_ssd` branch above.
             let effective = driftwm::config::effective_decoration_mode(
                 applied.as_ref().and_then(|r| r.decoration.as_ref()),
@@ -377,11 +444,41 @@ pub fn compose_frame(
                     geometry, [radius, radius, radius, radius], zoom, output_scale,
                 );
 
-                // Compositor shadow behind CSD windows.
+                if effective_bw > 0
+                    && let Some(border_shader) = state.render.border_shader.clone()
+                {
+                    push_border_element(
+                        target,
+                        &mut state.render.border_cache,
+                        wl_surface.id(),
+                        &border_shader,
+                        geometry,
+                        radius,
+                        effective_bw,
+                        border_color,
+                        is_focused,
+                        opacity,
+                        scale,
+                        zoom,
+                    );
+                }
+
+                // Compositor shadow behind CSD windows. Footprint and corner
+                // radius grow by border_width so the shadow grades out from
+                // the border's outer edge instead of the content edge.
                 if let Some(shader) = state.render.shadow_shader.clone() {
+                    let bw = effective_bw as f64;
                     let body_logical: Rectangle<f64, Logical> = Rectangle::new(
-                        (render_loc.x + geo.loc.x as f64, render_loc.y + geo.loc.y as f64).into(),
-                        (geom_size.w as f64, geom_size.h as f64).into(),
+                        (
+                            render_loc.x + geo.loc.x as f64 - bw,
+                            render_loc.y + geo.loc.y as f64 - bw,
+                        )
+                            .into(),
+                        (
+                            geom_size.w as f64 + 2.0 * bw,
+                            geom_size.h as f64 + 2.0 * bw,
+                        )
+                            .into(),
                     );
                     push_shadow_element(
                         target,
@@ -389,7 +486,7 @@ pub fn compose_frame(
                         wl_surface.id(),
                         &shader,
                         body_logical,
-                        state.config.decorations.corner_radius as f32,
+                        (state.config.decorations.corner_radius + effective_bw) as f32,
                         opacity,
                         scale,
                         zoom,
@@ -398,6 +495,32 @@ pub fn compose_frame(
                 }
             } else {
                 push_plain_elements(target, elems, zoom);
+                // decoration = "none" (and not fullscreen) can opt into a
+                // border via a window rule. Straight corners, no shadow.
+                if bare
+                    && !is_fullscreen
+                    && effective_bw > 0
+                    && let Some(border_shader) = state.render.border_shader.clone()
+                {
+                    let inner_logical: Rectangle<f64, Logical> = Rectangle::new(
+                        (render_loc.x + geo.loc.x as f64, render_loc.y + geo.loc.y as f64).into(),
+                        (geom_size.w as f64, geom_size.h as f64).into(),
+                    );
+                    push_border_element(
+                        target,
+                        &mut state.render.border_cache,
+                        wl_surface.id(),
+                        &border_shader,
+                        inner_logical,
+                        0.0,
+                        effective_bw,
+                        border_color,
+                        is_focused,
+                        opacity,
+                        scale,
+                        zoom,
+                    );
+                }
             }
         } else {
             push_plain_elements(target, elems, zoom);

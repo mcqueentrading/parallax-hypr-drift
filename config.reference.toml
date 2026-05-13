@@ -112,14 +112,22 @@
 # fg_color = "#FFFFFF"           # close button × color (default: white)
 # corner_radius = 10             # clip window corners to this radius
 # default_mode = "client"        # decoration mode for windows without a rule.
-                                 # "client":     CSD — client draws its own titlebar (default)
-                                 # "borderless": SSD — no titlebar, just shadow + corners
-                                 # "none":       SSD — bare client surface, no chrome
+                                 # "client":  CSD — client draws its own titlebar (default)
+                                 # "minimal": SSD — no titlebar, just shadow + corners
+                                 # "none":    SSD — bare client surface, no chrome
                                  #
                                  # "server" (driftwm titlebar) is intentionally not allowed as a
                                  # global default: many toolkits (GTK, Electron) ignore
                                  # xdg-decoration and keep drawing CSD, producing a misaligned
                                  # double titlebar. Use it per-app via [[window_rules]] instead.
+
+# Borders apply to "client", "server", and "minimal" modes. "none" mode has
+# no border unless one is set per-app in [[window_rules]].
+# border_width = 0               # px; 0 disables the border
+# border_color = "#303030"       # unfocused border (default: dark gray)
+# border_color_focused = "#303030"  # focused border. Same default as above —
+                                    # set this to a different color to get a
+                                    # focus indicator.
 
 [effects]
 # blur_radius = 2                # number of Kawase down+up passes (default: 2)
@@ -404,12 +412,18 @@
 #                navigation and alt-tab (default: false)
 #   decoration — overrides [decorations] default_mode for matched windows.
 #                Omit to inherit default_mode. Values:
-#                "client":     CSD — client's own titlebar
-#                "server":     SSD — driftwm's titlebar
-#                "borderless": SSD — no titlebar, but shadow + corner clip
-#                "none":       SSD — completely bare, no chrome at all
+#                "client":  CSD — client's own titlebar
+#                "server":  SSD — driftwm's titlebar
+#                "minimal": SSD — no titlebar, but shadow + corner clip
+#                "none":    SSD — completely bare, no chrome at all
 #   blur       — true: blur background behind this window (default: false)
 #   opacity    — 0.0–1.0: window transparency (default: 1.0, fully opaque)
+#   border_width         — per-window border width override (px). Set on a
+#                          decoration = "none" rule to give a widget a border.
+#                          Set to 0 to disable border on a window even when
+#                          [decorations] border_width > 0.
+#   border_color         — per-window unfocused border color hex (e.g. "#5c5c5c").
+#   border_color_focused — per-window focused border color hex.
 #   pass_keys  — controls which compositor keybindings are forwarded to the app:
 #                  pass_keys = true           → forward ALL keys (game-friendly)
 #                  pass_keys = ["mod+q",      → forward ONLY these combos; all other
