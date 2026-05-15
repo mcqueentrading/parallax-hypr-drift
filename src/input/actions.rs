@@ -8,6 +8,13 @@ use driftwm::config::Action;
 use driftwm::window_ext::WindowExt;
 use crate::state::{DriftWm, FocusTarget, HomeReturn};
 
+/// Use the focused window as the cone-search origin only when it's fully
+/// inside the viewport. Any clipping → search from viewport center instead
+/// (cone can still return the focused window if it's the nearest in that
+/// direction, which is useful for snapping back to a partially-visible
+/// focused window).
+const CENTER_NEAREST_ANCHOR_THRESHOLD: f64 = 1.0;
+
 impl DriftWm {
     pub fn execute_action(&mut self, action: &Action) {
         // Snapshot fullscreen window before the guard exits it.
@@ -131,27 +138,20 @@ impl DriftWm {
                 }
 
                 let focused = self.focused_window();
-                let viewport_size = self.get_viewport_size();
-                let camera = self.camera();
-                let zoom = self.zoom();
                 let viewport_center = self.viewport_center_canvas();
 
-                let (origin, skip) = if let Some(ref w) = focused {
-                    let loc = self.space.element_location(w).unwrap_or_default();
-                    let size = w.geometry().size;
-                    if canvas::visible_fraction(loc, size, camera, viewport_size, zoom)
-                        >= 0.5
-                    {
-                        let center = self.window_visual_center(w).unwrap_or_else(|| {
-                            Point::from((
-                                loc.x as f64 + size.w as f64 / 2.0,
-                                loc.y as f64 + size.h as f64 / 2.0,
-                            ))
-                        });
-                        (center, Some(NavTarget::Window(w.clone())))
-                    } else {
-                        (viewport_center, None)
-                    }
+                let (origin, skip) = if let Some(ref w) = focused
+                    && self.window_visible_at_least(w, CENTER_NEAREST_ANCHOR_THRESHOLD)
+                {
+                    let center = self.window_visual_center(w).unwrap_or_else(|| {
+                        let loc = self.space.element_location(w).unwrap_or_default();
+                        let size = w.geometry().size;
+                        Point::from((
+                            loc.x as f64 + size.w as f64 / 2.0,
+                            loc.y as f64 + size.h as f64 / 2.0,
+                        ))
+                    });
+                    (center, Some(NavTarget::Window(w.clone())))
                 } else {
                     (viewport_center, None)
                 };

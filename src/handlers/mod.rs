@@ -3,6 +3,11 @@ pub mod compositor;
 pub mod layer_shell;
 pub mod xdg_shell;
 
+/// Skip the pan on xdg-activation only when the activated window is already
+/// fully inside the viewport. Any clipping → animate the camera to bring it
+/// fully into view; the activating client is asking the user to look at it.
+const ACTIVATION_VISIBLE_THRESHOLD: f64 = 1.0;
+
 use crate::state::{DriftWm, FocusTarget};
 use driftwm::window_ext::WindowExt;
 use smithay::wayland::seat::WaylandFocus;
@@ -265,15 +270,7 @@ impl XdgActivationHandler for DriftWm {
             if window.geometry().size.w == 0 || window.geometry().size.h == 0 {
                 return;
             }
-            let mostly_visible = self.space.element_location(&window).is_some_and(|loc| {
-                driftwm::canvas::visible_fraction(
-                    loc,
-                    window.geometry().size,
-                    self.camera(),
-                    self.get_viewport_size(),
-                    self.zoom(),
-                ) >= 0.5
-            });
+            let mostly_visible = self.window_visible_at_least(&window, ACTIVATION_VISIBLE_THRESHOLD);
             if mostly_visible {
                 let serial = smithay::utils::SERIAL_COUNTER.next_serial();
                 self.raise_and_focus(&window, serial);

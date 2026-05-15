@@ -77,6 +77,12 @@ use driftwm::canvas::MomentumState;
 use driftwm::config::Config;
 use driftwm::window_ext::WindowExt;
 
+/// Min visible fraction of the focused window for auto-placement to anchor a
+/// new window to its cluster. Lower than the navigation/activation thresholds:
+/// even a small sliver of the cluster on-screen is a stronger signal than the
+/// alternative (dropping the new window in the middle of an unrelated region).
+const AUTO_PLACE_CLUSTER_THRESHOLD: f64 = 0.33;
+
 /// A layer surface placed at a fixed canvas position (instead of screen-anchored via LayerMap).
 /// Created when a layer surface's namespace matches a window rule with `position`.
 pub struct CanvasLayer {
@@ -1082,6 +1088,21 @@ impl DriftWm {
         )))
     }
 
+    /// Whether at least `threshold` of the window's area is currently inside
+    /// the viewport. Returns false if the window isn't placed.
+    pub fn window_visible_at_least(&self, window: &Window, threshold: f64) -> bool {
+        let Some(loc) = self.space.element_location(window) else {
+            return false;
+        };
+        driftwm::canvas::visible_fraction(
+            loc,
+            window.geometry().size,
+            self.camera(),
+            self.get_viewport_size(),
+            self.zoom(),
+        ) >= threshold
+    }
+
     /// Spawn position for `placement = "cursor"`: center the visual frame
     /// (titlebar + content) on the cursor, clamped to the active output's
     /// usable canvas rect so the new window is fully visible without panning.
@@ -1157,27 +1178,14 @@ impl DriftWm {
             return None;
         }
 
-        // Only anchor to focused if it's visibly the window the user is
-        // working with right now (≥50% of it inside the viewport). Same
-        // threshold as `CenterNearest`. When the user has panned away
-        // (or zoomed off the window), they intend to start a fresh
-        // cluster — caller falls back to center placement.
-        {
-            let f_loc = self.space.element_location(focused)?;
-            let f_size = focused.geometry().size;
-            let viewport_size = self.get_viewport_size();
-            let camera = self.camera();
-            let zoom = self.zoom();
-            let visible = driftwm::canvas::visible_fraction(
-                f_loc,
-                f_size,
-                camera,
-                viewport_size,
-                zoom,
-            );
-            if visible < 0.5 {
-                return None;
-            }
+        // Only anchor to focused if enough of it is visible that the user
+        // can plausibly be working on its cluster. The threshold is lower
+        // than `CenterNearest` because here we err toward growing an
+        // existing cluster — random new-window placement is the more
+        // disruptive failure mode. When the user has panned mostly away,
+        // they intend a fresh cluster — caller falls back to center placement.
+        if !self.window_visible_at_least(focused, AUTO_PLACE_CLUSTER_THRESHOLD) {
+            return None;
         }
 
         // Widgets (xdg-toplevel and canvas layer-shell) are visually below
