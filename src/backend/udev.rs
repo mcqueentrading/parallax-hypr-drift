@@ -16,7 +16,7 @@ use smithay::{
             compositor::{DrmCompositor, FrameError, FrameFlags, PrimaryPlaneElement},
             exporter::gbm::GbmFramebufferExporter,
         },
-        egl::{EGLContext, EGLDisplay},
+        egl::{EGLContext, EGLDevice, EGLDisplay},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::ImportDma,
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -111,8 +111,7 @@ pub(crate) fn render_if_needed(device: &UdevDevice, data: &mut DriftWm) {
     if !data.pending_dpms.is_empty() {
         let pending: Vec<(Output, bool)> = data.pending_dpms.drain().collect();
         for (output, on) in &pending {
-            let Some((&crtc, surface)) =
-                dev.surfaces.iter_mut().find(|(_, s)| s.output == *output)
+            let Some((&crtc, surface)) = dev.surfaces.iter_mut().find(|(_, s)| s.output == *output)
             else {
                 continue;
             };
@@ -337,10 +336,23 @@ pub fn init_udev(
                     }
                 };
 
-            let render_node = node
-                .node_with_type(NodeType::Render)
-                .and_then(|n| n.ok())
-                .unwrap_or(node);
+            // Ask EGL/Mesa for the actual rendering device — on split-DRM
+            // systems the KMS node we opened has no render node, but Mesa
+            // routes rendering through the right GPU under the hood. We need
+            // to advertise that GPU's render node to clients (`zwp_linux_dmabuf_v1`
+            // feedback, xdph-wlr) so they don't crash trying to use the
+            // display-only node.
+            let render_node = EGLDevice::device_for_display(&egl_display)
+                .ok()
+                .and_then(|d| d.try_get_render_node().ok().flatten())
+                .or_else(|| node.node_with_type(NodeType::Render).and_then(|n| n.ok()))
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        "could not resolve a DRM render node; falling back to KMS node {node:?} \
+                         — capture clients may misbehave"
+                    );
+                    node
+                });
 
             tracing::info!("Using GPU: {}", path.display());
             break 'found (
@@ -362,8 +374,7 @@ pub fn init_udev(
     // Capture clients allocate buffers we render INTO, so advertise the
     // render-target set (already CCS-filtered above) — not the wider
     // import set, which can include formats we can't bind as a target.
-    data.render_dmabuf_formats =
-        Some(render_formats.iter().copied().collect());
+    data.render_dmabuf_formats = Some(render_formats.iter().copied().collect());
     let default_feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), formats)
         .build()
         .expect("failed to build dmabuf feedback");
@@ -1496,7 +1507,10 @@ fn apply_pending_mode_changes(
         };
 
         let Some(mode) = resolve_pending_mode(&pm.intent, &connector, &name) else {
-            tracing::error!("Mode change for '{name}': could not resolve intent {:?}", pm.intent);
+            tracing::error!(
+                "Mode change for '{name}': could not resolve intent {:?}",
+                pm.intent
+            );
             continue;
         };
 
@@ -1518,10 +1532,8 @@ fn apply_pending_mode_changes(
                     map.arrange();
                 }
                 // Resize fullscreen window (if any) to the new viewport.
-                let new_size = smithay::utils::Size::from((
-                    mode.size().0 as i32,
-                    mode.size().1 as i32,
-                ));
+                let new_size =
+                    smithay::utils::Size::from((mode.size().0 as i32, mode.size().1 as i32));
                 data.resize_fullscreen_for_output(&surface.output, new_size);
                 data.render.remove_output(&name);
                 data.redraws_needed.insert(*crtc);
