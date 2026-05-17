@@ -3,7 +3,7 @@
 // u_inner_radius + u_border_width, which keeps stroke thickness constant
 // along the rounded corners (treating the single radius as the outer arc
 // would pinch the stroke at corners).
-precision mediump float;
+precision highp float;
 varying vec2 v_coords;
 uniform float alpha;
 uniform vec2 size;          // element size in pixels
