@@ -1,14 +1,15 @@
 use smithay::{
     desktop::Window,
+    output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::Point,
+    utils::{Logical, Point},
     wayland::seat::WaylandFocus,
 };
 use crate::surface_tree::focus_belongs_to_window;
 use driftwm::layout::snap::SnapRect;
 use driftwm::window_ext::WindowExt;
 
-use super::DriftWm;
+use super::{DriftWm, output_state};
 
 fn rects_overlap(a: &SnapRect, b: &SnapRect) -> bool {
     a.x_low < b.x_high && b.x_low < a.x_high && a.y_low < b.y_high && b.y_low < a.y_high
@@ -128,6 +129,70 @@ impl DriftWm {
             && screen_y_low >= u_y_low
             && screen_x_high <= u_x_high
             && screen_y_high <= u_y_high
+    }
+
+    /// Does the window's snap rect intersect `output`'s usable area at that
+    /// output's camera and zoom? Partial overlap counts as visible. Returns
+    /// `false` for unmapped windows and widgets (no snap rect).
+    pub fn window_intersects_viewport_on(&self, w: &Window, output: &Output) -> bool {
+        let Some(rect) = self.snap_rect_for(w) else {
+            return false;
+        };
+        let (camera, zoom) = {
+            let os = output_state(output);
+            (os.camera, os.zoom)
+        };
+        let usable = smithay::desktop::layer_map_for_output(output).non_exclusive_zone();
+
+        let screen_x_low = (rect.x_low - camera.x) * zoom;
+        let screen_y_low = (rect.y_low - camera.y) * zoom;
+        let screen_x_high = (rect.x_high - camera.x) * zoom;
+        let screen_y_high = (rect.y_high - camera.y) * zoom;
+
+        let u_x_low = usable.loc.x as f64;
+        let u_y_low = usable.loc.y as f64;
+        let u_x_high = (usable.loc.x + usable.size.w) as f64;
+        let u_y_high = (usable.loc.y + usable.size.h) as f64;
+
+        screen_x_low < u_x_high
+            && u_x_low < screen_x_high
+            && screen_y_low < u_y_high
+            && u_y_low < screen_y_high
+    }
+
+    /// Nearest window (by canvas distance from `from_center`) that is at least
+    /// partially visible on `output`. Excludes `exclude` and widgets.
+    pub fn nearest_visible_window_on(
+        &self,
+        from_center: Point<f64, Logical>,
+        output: &Output,
+        exclude: &Window,
+    ) -> Option<Window> {
+        self.space
+            .elements()
+            .filter(|w| {
+                *w != exclude
+                    && !w
+                        .wl_surface()
+                        .and_then(|s| driftwm::config::applied_rule(&s))
+                        .is_some_and(|r| r.widget)
+                    && self.window_intersects_viewport_on(w, output)
+            })
+            .min_by(|a, b| {
+                let dist = |w: &Window| {
+                    self.window_visual_center(w)
+                        .map(|c| {
+                            let dx = c.x - from_center.x;
+                            let dy = c.y - from_center.y;
+                            dx * dx + dy * dy
+                        })
+                        .unwrap_or(f64::INFINITY)
+                };
+                dist(a)
+                    .partial_cmp(&dist(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned()
     }
 
     /// Most-recent focus-history entry that is spatially related to `destroyed`:

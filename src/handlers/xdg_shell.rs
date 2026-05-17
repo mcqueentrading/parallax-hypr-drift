@@ -16,7 +16,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{Resource, protocol::{wl_output, wl_seat}},
     },
-    utils::{Rectangle, Serial},
+    utils::{Point, Rectangle, Serial},
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -206,6 +206,21 @@ impl XdgShellHandler for DriftWm {
             .find(|w| w.wl_surface().as_deref() == Some(&wl_surface))
             .cloned();
         if let Some(ref window) = window {
+            // Restore the per-output camera/zoom first if the destroyed
+            // window was fullscreen — the focus chooser below evaluates
+            // visibility against the home output's current camera, which is
+            // still parked at the fullscreen window's position until this
+            // runs.
+            let fs_output = self.fullscreen.iter()
+                .find(|(_, fs)| &fs.window == window)
+                .map(|(o, _)| o.clone());
+            if let Some(ref output) = fs_output {
+                let fs = self.fullscreen.remove(output).unwrap();
+                output_state(output).camera = fs.saved_camera;
+                output_state(output).zoom = fs.saved_zoom;
+                self.update_output_from_camera();
+            }
+
             // Pick a window to follow when the destroyed one was focused.
             // Priority: explicit parent (xdg_toplevel.set_parent), then the
             // MRU history entry that's spatially related (cluster member or
@@ -245,26 +260,48 @@ impl XdgShellHandler for DriftWm {
                     } else {
                         self.navigate_to_window(&target, false);
                     }
-                } else if let Some(fallback) = self
-                    .focus_history
-                    .iter()
-                    .find(|w| w != &window)
-                    .and_then(|w| w.wl_surface().map(|s| FocusTarget(s.into_owned())))
-                {
+                } else {
+                    // No follow target. Pick first MRU entry; if it's
+                    // completely off the destroyed window's home output, fall
+                    // back to the nearest visible window (by canvas distance
+                    // from the destroyed window's center). If nothing is
+                    // visible, clear focus rather than focus the void.
+                    //
+                    // Prefer the fullscreen output when the destroyed window
+                    // was fullscreen: after the camera restore above, the
+                    // window's location is still pinned to the old fullscreen
+                    // camera, so output_for_window may misroute to the
+                    // cursor's monitor.
+                    let home = fs_output
+                        .clone()
+                        .or_else(|| self.output_for_window(window))
+                        .or_else(|| self.active_output());
+                    let mru = self.focus_history.iter().find(|w| w != &window).cloned();
+                    let target = match (home.as_ref(), mru) {
+                        (Some(out), Some(m)) if self.window_intersects_viewport_on(&m, out) => {
+                            Some(m)
+                        }
+                        (Some(out), _) => {
+                            let from = self.window_visual_center(window).unwrap_or_else(|| {
+                                let loc = self.space.element_location(window).unwrap_or_default();
+                                let size = window.geometry().size;
+                                Point::from((
+                                    loc.x as f64 + size.w as f64 / 2.0,
+                                    loc.y as f64 + size.h as f64 / 2.0,
+                                ))
+                            });
+                            self.nearest_visible_window_on(from, out, window)
+                        }
+                        (None, _) => None,
+                    };
+
                     let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                    keyboard.set_focus(self, Some(fallback), serial);
+                    if let Some(target) = target {
+                        self.raise_and_focus(&target, serial);
+                    } else {
+                        keyboard.set_focus(self, None, serial);
+                    }
                 }
-            }
-            // If the destroyed window was fullscreen, restore viewport
-            let fs_output = self.fullscreen.iter()
-                .find(|(_, fs)| &fs.window == window)
-                .map(|(o, _)| o.clone());
-            if let Some(output) = fs_output {
-                let fs = self.fullscreen.remove(&output).unwrap();
-                // Set camera/zoom on the specific output
-                output_state(&output).camera = fs.saved_camera;
-                output_state(&output).zoom = fs.saved_zoom;
-                self.update_output_from_camera();
             }
             // Remove from focus history before unmapping
             self.focus_history.retain(|w| w != window);
