@@ -6,6 +6,13 @@ use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::utils::{Logical, Point, Transform};
 
+/// Embedded left-pointer fallback used when no xcursor theme is resolvable
+/// (e.g. minimal NixOS configs). 24×24 RGBA, hotspot (7, 4). Sourced from
+/// the elementary cursor theme (GPL-3.0); see resources/fallback_cursor.LICENSE.md.
+static FALLBACK_CURSOR_RGBA: &[u8] = include_bytes!("../../resources/fallback_cursor.rgba");
+const FALLBACK_CURSOR_SIZE: i32 = 24;
+const FALLBACK_CURSOR_HOTSPOT: (i32, i32) = (7, 4);
+
 /// All animation frames for a loaded xcursor, at a single nominal size.
 pub struct CursorFrames {
     /// (buffer, hotspot, delay_ms) per frame.
@@ -53,6 +60,10 @@ impl CursorState {
 
     /// Load all xcursor animation frames by name and cache them.
     /// Returns a reference to the cached `CursorFrames`.
+    ///
+    /// If theme resolution fails for `name == "default"`, the embedded fallback
+    /// shape is used so the pointer stays visible on systems with no usable
+    /// cursor theme (e.g. minimal NixOS configs).
     pub fn load_xcursor(
         &mut self,
         name: &str,
@@ -60,53 +71,76 @@ impl CursorState {
         target_size: u32,
     ) -> Option<&CursorFrames> {
         if !self.cursor_buffers.contains_key(name) {
-            let theme = xcursor::CursorTheme::load(theme_name);
-            let path = theme.load_icon(name)?;
-            let data = std::fs::read(path).ok()?;
-            let images = xcursor::parser::parse_xcursor(&data)?;
-
-            let best_size = images
-                .iter()
-                .map(|img| img.size)
-                .min_by_key(|&s| (s as i32 - target_size as i32).unsigned_abs())?;
-
-            let mut frames = Vec::new();
-            let mut total_delay: u32 = 0;
-            for img in &images {
-                if img.size != best_size {
-                    continue;
-                }
-                let buffer = MemoryRenderBuffer::from_slice(
-                    &img.pixels_rgba,
-                    Fourcc::Argb8888,
-                    (img.width as i32, img.height as i32),
-                    1,
-                    Transform::Normal,
-                    None,
-                );
-                let hotspot = Point::from((img.xhot as i32, img.yhot as i32));
-                frames.push((buffer, hotspot, img.delay));
-                total_delay = total_delay.saturating_add(img.delay);
-            }
-
-            if frames.is_empty() {
-                return None;
-            }
-
-            let total_duration_ms = if frames.len() == 1 || total_delay == 0 {
-                0
-            } else {
-                total_delay
+            let from_theme = load_from_theme(name, theme_name, target_size);
+            let frames = match from_theme {
+                Some(f) => f,
+                None if name == "default" => fallback_frames(),
+                None => return None,
             };
-
-            self.cursor_buffers.insert(
-                name.to_string(),
-                CursorFrames {
-                    frames,
-                    total_duration_ms,
-                },
-            );
+            self.cursor_buffers.insert(name.to_string(), frames);
         }
         self.cursor_buffers.get(name)
+    }
+}
+
+fn load_from_theme(name: &str, theme_name: &str, target_size: u32) -> Option<CursorFrames> {
+    let theme = xcursor::CursorTheme::load(theme_name);
+    let path = theme.load_icon(name)?;
+    let data = std::fs::read(path).ok()?;
+    let images = xcursor::parser::parse_xcursor(&data)?;
+
+    let best_size = images
+        .iter()
+        .map(|img| img.size)
+        .min_by_key(|&s| (s as i32 - target_size as i32).unsigned_abs())?;
+
+    let mut frames = Vec::new();
+    let mut total_delay: u32 = 0;
+    for img in &images {
+        if img.size != best_size {
+            continue;
+        }
+        let buffer = MemoryRenderBuffer::from_slice(
+            &img.pixels_rgba,
+            Fourcc::Argb8888,
+            (img.width as i32, img.height as i32),
+            1,
+            Transform::Normal,
+            None,
+        );
+        let hotspot = Point::from((img.xhot as i32, img.yhot as i32));
+        frames.push((buffer, hotspot, img.delay));
+        total_delay = total_delay.saturating_add(img.delay);
+    }
+
+    if frames.is_empty() {
+        return None;
+    }
+
+    let total_duration_ms = if frames.len() == 1 || total_delay == 0 {
+        0
+    } else {
+        total_delay
+    };
+
+    Some(CursorFrames {
+        frames,
+        total_duration_ms,
+    })
+}
+
+fn fallback_frames() -> CursorFrames {
+    let buffer = MemoryRenderBuffer::from_slice(
+        FALLBACK_CURSOR_RGBA,
+        Fourcc::Argb8888,
+        (FALLBACK_CURSOR_SIZE, FALLBACK_CURSOR_SIZE),
+        1,
+        Transform::Normal,
+        None,
+    );
+    let hotspot = Point::from(FALLBACK_CURSOR_HOTSPOT);
+    CursorFrames {
+        frames: vec![(buffer, hotspot, 0)],
+        total_duration_ms: 0,
     }
 }

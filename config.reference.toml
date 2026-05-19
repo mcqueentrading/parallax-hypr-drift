@@ -69,7 +69,7 @@
 # natural_scroll = false      # reverse scroll direction
 
 [cursor]
-# theme = "Adwaita"           # sets XCURSOR_THEME
+# theme = "default"           # sets XCURSOR_THEME
 # size = 24                   # sets XCURSOR_SIZE
 # inactive_opacity = 0.5      # cursor opacity on non-active outputs (0.0–1.0)
 
