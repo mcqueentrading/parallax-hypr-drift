@@ -504,6 +504,20 @@ impl Element for RoundedCornerElement {
         // (opaque_regions are element-local in smithay's convention).
         let mut geo = self.geometry.to_physical_precise_round(scale);
         geo.loc -= self.geometry(scale).loc;
+        // GTK4 mis-reports the full surface as opaque even though the rim
+        // column has partial alpha from anti-aliased GSK rasterization;
+        // smithay's no-blend path then writes those PMA values to the
+        // framebuffer raw, producing a 1-px dark line at the right/bottom
+        // edge. Shrink the opaque region by 1 physical pixel on every side
+        // so the rim always alpha-blends.
+        if geo.size.w > 2 && geo.size.h > 2 {
+            geo.loc.x += 1;
+            geo.loc.y += 1;
+            geo.size.w -= 2;
+            geo.size.h -= 2;
+        } else {
+            return OpaqueRegions::default();
+        }
         let clipped: Vec<_> = regions
             .into_iter()
             .filter_map(|rect| rect.intersection(geo))
