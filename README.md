@@ -343,7 +343,9 @@ Here are some tools that work well with it:
 - **swayosd** — Volume/brightness OSD
 - **grim + slurp** — Screenshots
 - **wlr-randr / wdisplays** — Output configuration
-- **COSMIC Settings** — Wi-Fi, Bluetooth, sound (or nm-applet + blueman + pavucontrol)
+- **COSMIC Settings** — Wi-Fi, Bluetooth, sound (or **nm-applet** + **blueman** + **pavucontrol**)
+
+Compositor-agnostic full Wayland shells like **noctalia**, **wayle**, and **dank-material-shell** should work too (`driftwm` supports `wlr-layer-shell` protocol) but without compositor-specific features.
 
 The [`extras/`](extras/) directory contains a complete setup — driftwm config,
 GLSL shader wallpapers, Python widgets (clock, calendar, system stats, power
@@ -353,6 +355,7 @@ tying it all together. Use it as a starting point or steal pieces.
 ## Community tools
 
 - [driftwm-settings](https://github.com/wwmaxik/driftwm-settings) — GTK4 GUI config editor
+- [driftwm-noctalia](https://github.com/youssefvdel/driftwm-noctalia) — noctalia shell fork adapted for driftwm
 
 ## Contributing
 
