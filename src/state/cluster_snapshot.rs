@@ -1,9 +1,6 @@
-//! Cluster-aware snapshots captured at drag/resize grab start.
-//!
-//! At grab start we freeze: (a) which windows belong to the focused
-//! window's cluster, and (b) per-member offsets or classification for
-//! the motion loop. These snapshots are independent of the rest of
-//! DriftWm — they only read `space`, `decorations`, and `config.snap_gap`.
+//! Cluster snapshots captured at drag/resize grab start: cluster membership
+//! plus per-member offsets / classifications for the motion loop. Only reads
+//! `space`, `decorations`, and `config.snap_gap`.
 
 use smithay::{
     desktop::{Space, Window},
@@ -20,18 +17,13 @@ use crate::decorations::WindowDecoration;
 
 use super::DriftWm;
 
-/// A cluster member (other than the primary) captured at resize grab start.
+/// Cluster member (other than primary) captured at resize grab start.
+/// Non-shifted members are stored too so the motion-time cascade can detect
+/// post-shift overlap and pull them in.
 ///
-/// All cluster members are recorded, not just statically-shifted ones: the
-/// motion-time cascade in `ResizeSurfaceGrab::motion` needs access to
-/// non-shifted members' initial rects so it can detect post-shift overlap and
-/// pull them into the shift set.
-///
-/// `axis_x` / `axis_y` are `Some` when this member is part of the *static*
-/// shift set (steps 1+2 of the snapshot algorithm): direct neighbors of the
-/// primary's resized edge, plus cluster members "downstream" of that edge
-/// reachable via BFS through the full cluster graph. `None` means the member
-/// stays stationary unless cascade picks it up.
+/// `axis_x` / `axis_y` are `Some` for the *static* shift set (direct
+/// neighbors of the primary's resized edge, plus downstream cluster
+/// members). `None` means stationary unless cascade picks it up.
 pub struct ClusterResizeMember {
     pub window: Window,
     pub initial_pos: Point<i32, Logical>,
@@ -42,29 +34,24 @@ pub struct ClusterResizeMember {
 
 /// Frozen-at-grab-start cluster snapshot for `ResizeSurfaceGrab`.
 ///
-/// `members` holds every cluster member except the primary. `exclude` is the
-/// *static* shift set only (not the full cluster): stationary cluster
-/// members remain valid `snap_targets`, so e.g. `A.right` can same-edge-snap
-/// to the right edge of a cluster neighbor that isn't moving this frame.
+/// `members` holds every cluster member except primary. `exclude` is the
+/// *static* shift set only — stationary cluster members stay valid
+/// `snap_targets` so e.g. `A.right` can snap to a still-life neighbor.
 pub struct ClusterResizeSnapshot {
     pub members: Vec<ClusterResizeMember>,
     pub exclude: HashSet<WlSurface>,
-    /// Sticky bonds formed during the push cascade. Once `(m, n)` is bonded,
-    /// `n` tracks `m`'s leading edge ± gap unconditionally on every
-    /// subsequent frame — including drag reversal and past `n`'s initial
-    /// position. Bonds persist until the grab ends (snapshot is dropped).
-    /// Stored as a `Vec` to preserve insertion order, which determines
-    /// cascade evaluation order for transitive chains (A→B before B→C).
+    /// Sticky bonds formed during push cascade. Once `(m, n)` is bonded, `n`
+    /// tracks `m`'s leading edge ± gap unconditionally — including drag
+    /// reversal past `n`'s initial position. Vec preserves insertion order
+    /// for transitive chains (A→B before B→C). Persists until grab end.
     pub bonds: Vec<(usize, usize)>,
-    /// Parallel set for O(1) bond dedup. Mirrors `bonds` contents.
+    /// O(1) dedup mirror of `bonds`.
     bonds_set: HashSet<(usize, usize)>,
-    /// Primary window's rect frozen at grab start, used to compute
-    /// primary-push encroachment in `resolve_cluster_shifts` phase 2.5.
+    /// Primary's rect frozen at grab start, for primary-push encroachment.
     pub primary_rect: driftwm::layout::snap::SnapRect,
-    /// Which edges are active for this resize (raw u32 bitmask: top=1,
-    /// bottom=2, left=4, right=8). Combined with `primary_rect` and the
-    /// current deltas, this lets `compute_shifts` reconstruct the primary's
-    /// current rect each frame without storing extra state.
+    /// Active resize edges as raw bitmask (top=1, bottom=2, left=4, right=8).
+    /// Combined with `primary_rect` + current deltas, reconstructs the
+    /// primary's current rect each frame.
     pub resize_edges: u32,
 }
 
@@ -86,12 +73,9 @@ impl ClusterResizeSnapshot {
         }
     }
 
-    /// Compute shifts, reposition every affected cluster member, and
-    /// re-map the primary to the tail of `Space::elements` so it stays
-    /// on top of its own cluster. One call replaces the duplicated
-    /// `compute_shifts` + `map_element` loop + primary re-map block that
-    /// was previously inlined in both `ResizeSurfaceGrab::motion` and
-    /// the gesture resize path.
+    /// Compute shifts, reposition every affected cluster member, and re-map
+    /// the primary to the tail of `Space::elements` so it stays on top of
+    /// its own cluster.
     pub fn apply_member_shifts(
         &mut self,
         space: &mut Space<Window>,
@@ -125,11 +109,8 @@ impl ClusterResizeSnapshot {
         }
     }
 
-    /// Compute the per-member translation vector for one motion tick.
-    ///
-    /// Wraps `cluster::resolve_cluster_shifts`, passing the accumulated
-    /// bonds and merging any newly-formed bonds back. Takes `&mut self`
-    /// so bonds persist across frames.
+    /// Per-member translation vector for one motion tick. Wraps
+    /// `resolve_cluster_shifts`, persisting newly-formed bonds across frames.
     pub fn compute_shifts(
         &mut self,
         width_delta: i32,
@@ -139,9 +120,8 @@ impl ClusterResizeSnapshot {
         use driftwm::layout::cluster::{ResizeClassification, resolve_cluster_shifts};
         use smithay::utils::IsAlive;
 
-        // Dead windows get a degenerate rect that can't produce overlap
-        // in the push cascade, preventing ghost-rect collisions from a
-        // member that was unmapped mid-drag.
+        // Dead windows get a degenerate rect that can't overlap in cascade,
+        // preventing ghost-rect collisions from mid-drag unmaps.
         const DEAD_RECT: driftwm::layout::snap::SnapRect = driftwm::layout::snap::SnapRect {
             x_low: f64::MAX / 2.0,
             x_high: f64::MAX / 2.0,
@@ -162,8 +142,8 @@ impl ClusterResizeSnapshot {
             })
             .collect();
 
-        // Reconstruct primary's current rect from the frozen initial rect and
-        // the active edges + current deltas, so phase 2.5 can push members.
+        // Reconstruct primary's current rect from frozen initial + active
+        // edges + deltas, so phase 2.5 can push members.
         let mut p_cur = self.primary_rect;
         if self.resize_edges & 8 != 0 { p_cur.x_high += width_delta as f64; }
         if self.resize_edges & 4 != 0 { p_cur.x_low -= width_delta as f64; }
@@ -182,19 +162,17 @@ impl ClusterResizeSnapshot {
     }
 }
 
-/// `(cluster_members, cluster_member_surfaces)` — snapshot for a move drag.
-/// Members carry their canvas-offset-from-primary; surfaces are the exclude
-/// set for `snap_targets` during the drag.
+/// Snapshot for a move drag: members carry canvas-offset-from-primary;
+/// surfaces are the exclude set for `snap_targets`.
 pub type ClusterDragSnapshot = (
     Vec<(Window, Point<i32, Logical>)>,
     HashSet<WlSurface>,
 );
 
 impl DriftWm {
-    /// Build snap target rectangles for all windows except `primary` and
-    /// anything in `cluster_excludes` (used during a multi-window cluster
-    /// drag to stop members from snapping against each other). Widgets are
-    /// always skipped.
+    /// Snap target rects for all windows except `primary` and
+    /// `cluster_excludes` (latter used during multi-window cluster drags to
+    /// stop members snapping against each other). Widgets always skipped.
     pub fn snap_targets(
         &self,
         primary: &WlSurface,
@@ -209,9 +187,8 @@ impl DriftWm {
         )
     }
 
-    /// Every non-widget window in the space with its `SnapRect`. Used to
-    /// feed `cluster::cluster_of` at drag start. The surface is discarded —
-    /// `Window` identity is what the BFS needs.
+    /// Every non-widget window with its `SnapRect`. Feeds `cluster_of` at
+    /// drag start; BFS needs `Window` identity, not surface.
     pub fn all_windows_with_snap_rects(&self) -> Vec<(Window, driftwm::layout::snap::SnapRect)> {
         self.space
             .elements()
@@ -222,21 +199,18 @@ impl DriftWm {
             .collect()
     }
 
-    /// `SnapRect` (border + title-bar inflated) for a single window. Returns
-    /// `None` for widgets or unmapped windows.
+    /// Border + title-bar inflated `SnapRect`. `None` for widgets / unmapped.
     pub fn snap_rect_for(&self, w: &Window) -> Option<driftwm::layout::snap::SnapRect> {
         window_snap_rect(&self.space, &self.decorations, &self.config.decorations, w)
             .map(|(_, r)| r)
     }
 
-    /// Snapshot `w`'s current `SnapRect` into `stable_snap_rects`. Call at
-    /// settled events that change `w`'s canvas rect: initial map,
-    /// move/resize grab end, post-unfit recenter, fit-snapped / unfit-snapped
-    /// cluster members. Fit/unfit primaries are cached explicitly by those
-    /// paths (the client hasn't acked the configure yet, so
-    /// `geometry().size` here would store wrong dimensions). The cached rect
-    /// outlives mid-teardown geometry changes and is consulted by
-    /// `first_spatially_related_in_history` when picking a focus follow.
+    /// Snapshot `w`'s current `SnapRect` into `stable_snap_rects`. Call on
+    /// settled events: initial map, grab end, post-unfit recenter, fit/
+    /// unfit-snapped cluster members. Fit/unfit primaries are cached by
+    /// those paths directly (configure not yet acked, so `geometry().size`
+    /// would be wrong here). The cached rect outlives mid-teardown geometry
+    /// changes and is consulted by `first_spatially_related_in_history`.
     pub fn refresh_stable_snap_rect(&mut self, w: &Window) {
         let Some(rect) = self.snap_rect_for(w) else {
             return;
@@ -247,18 +221,14 @@ impl DriftWm {
         self.stable_snap_rects.insert(surface.id(), rect);
     }
 
-    /// Snapshot the focused window's cluster for a move drag.
-    ///
-    /// Returns both the member offsets (from the primary's canvas position)
-    /// AND the exclude set of member surfaces. Both are frozen at drag start:
-    /// cluster membership doesn't change mid-drag and offsets are invariant
-    /// over motion, snap, and cross-output teleport.
+    /// Snapshot the focused window's cluster for a move drag: member offsets
+    /// from primary + exclude set of member surfaces. Frozen at drag start —
+    /// cluster membership and offsets are invariant over motion / snap /
+    /// cross-output teleport.
     //
-    // smithay's `Window` wraps `Arc<WindowInner>` which contains an
-    // `AtomicF64` (scale), so clippy flags it as an interior-mutable hash
-    // key. Here that's a false positive: `Window: Hash + Eq` are both
-    // implemented on the `Arc` pointer identity, which is stable under any
-    // interior mutation of `WindowInner`. Safe to use as a HashSet member.
+    // smithay's `Window` wraps `Arc<WindowInner>` (contains AtomicF64), so
+    // clippy flags interior-mutable hash key. False positive: Hash + Eq are
+    // implemented on Arc pointer identity, stable under interior mutation.
     #[allow(clippy::mutable_key_type)]
     pub fn cluster_snapshot_for_drag(
         &self,
@@ -286,27 +256,17 @@ impl DriftWm {
         (members, surfaces)
     }
 
-    /// Snapshot the focused window's cluster for a resize drag.
+    /// Snapshot focused window's cluster for a resize drag.
     ///
-    /// Three-step classification, per active resize edge:
-    ///
-    /// 1. **Seed** with the primary's direct neighbors on that edge
-    ///    (first hop only — `adjacent_side(primary, m) == Some(side)`).
-    /// 2. **BFS expand** from the seed through the full cluster graph
-    ///    (any adjacency direction), adding any member whose rect is
-    ///    *downstream* of the primary's edge. For a right drag, downstream
-    ///    means `m.x_low >= primary.x_high` — i.e. the member sits on or
-    ///    past the primary's right edge and can be pushed by it.
-    /// 3. Members not in any static shift set are still stored (with
-    ///    `axis_x = None`, `axis_y = None`) so that the motion-time
-    ///    cascade can detect and resolve overlap between shifted and
-    ///    non-shifted members.
-    ///
-    /// Steps 1+2 are static (computed once at grab start). Step 3 runs per
-    /// motion tick inside `ResizeSurfaceGrab::motion`.
+    /// Three-step classification per active resize edge:
+    ///   1. **Seed**: primary's direct neighbors on that edge.
+    ///   2. **BFS expand**: through the full cluster graph, adding any
+    ///      member whose rect is *downstream* of the primary's edge
+    ///      (for Right: `m.x_low >= primary.x_high`).
+    ///   3. Off-shift-set members are stored with `axis_x/axis_y = None` so
+    ///      the motion-time cascade can still detect overlap with them.
     //
-    // Same Arc-identity rationale as `cluster_snapshot_for_drag`: smithay's
-    // `Window` is hashed by Arc pointer and is stable under interior mutation.
+    // Same Arc-identity rationale as `cluster_snapshot_for_drag`.
     #[allow(clippy::mutable_key_type)]
     pub fn cluster_snapshot_for_resize(
         &self,
@@ -321,8 +281,8 @@ impl DriftWm {
         let gap = self.config.snap_gap;
         let full = cluster_of(window, &rects, gap);
 
-        // Primary's SnapRect for the downstream filter. Bail with an empty
-        // snapshot if the primary somehow has no rect (widget, unmapped).
+        // Primary's SnapRect for downstream filter; bail empty if absent
+        // (widget, unmapped).
         let Some(primary_rect) = rects
             .iter()
             .find(|(w, _)| w == window)
@@ -331,11 +291,10 @@ impl DriftWm {
             return ClusterResizeSnapshot::empty();
         };
 
-        // Rect lookup for BFS inner loop. Keys are cloned Arcs — cheap.
+        // Rect lookup keyed on cloned Arc — cheap.
         let rect_of: HashMap<Window, SnapRect> =
             rects.iter().map(|(w, r)| (w.clone(), *r)).collect();
 
-        // Compute the static shift set for a single side.
         let compute_shift_set = |side: Side| -> HashSet<Window> {
             // Step 1: direct neighbors of primary on this side.
             let mut set: HashSet<Window> = HashSet::new();
@@ -351,8 +310,7 @@ impl DriftWm {
                 }
             }
 
-            // Step 2: BFS through full cluster graph, adding members whose
-            // rect is downstream of the primary's `side` edge.
+            // Step 2: BFS the full cluster graph, adding downstream members.
             let is_downstream = |r: &SnapRect| -> bool {
                 match side {
                     Side::Right => r.x_low >= primary_rect.x_high,
@@ -405,9 +363,8 @@ impl DriftWm {
             HashSet::new()
         };
 
-        // Exclude set = union of static shift sets only. Stationary cluster
-        // members stay as valid snap targets so the primary can same-edge
-        // or opposite-edge snap against them.
+        // Exclude = union of static shift sets only. Stationary members
+        // stay as snap targets so the primary can snap against them.
         let mut exclude: HashSet<WlSurface> = HashSet::new();
         for set in [&right_set, &left_set, &bottom_set, &top_set] {
             for w in set {
@@ -417,9 +374,8 @@ impl DriftWm {
             }
         }
 
-        // Build the member list from the FULL cluster. Members with no
-        // static shift on either axis still ride along so the cascade can
-        // reach them.
+        // Members come from the FULL cluster — unshifted ones still ride
+        // along so the cascade can reach them.
         let mut members = Vec::new();
         for m in full {
             if &m == window {
@@ -465,10 +421,8 @@ impl DriftWm {
     }
 }
 
-/// Free-function form of `DriftWm::snap_targets` for callers that already hold
-/// a mutable borrow on another `DriftWm` field (e.g. `gesture_state`) and so
-/// cannot call the `&self` method. Rust's borrow checker accepts disjoint field
-/// borrows when they're passed as separate references.
+/// Free-function form of `DriftWm::snap_targets` for callers holding a
+/// mutable borrow on another `DriftWm` field (disjoint borrow workaround).
 pub(crate) fn snap_targets_impl(
     space: &Space<Window>,
     decorations: &HashMap<
@@ -508,12 +462,10 @@ pub(crate) fn snap_targets_impl(
     (others, self_bar, self_bw)
 }
 
-/// Compute the snap rectangle for a single window, returning its surface
-/// alongside (needed by `snap_targets_impl` for exclusion checks). Returns
-/// `None` for widgets, unmapped windows, or anything without a `wl_surface`.
-/// Y-low includes the title-bar height for SSD-decorated windows. The rect
-/// is inflated by the window's effective border_width on all four sides so
-/// snap/cluster math operates on the visible footprint.
+/// `(surface, snap_rect)` for one window. Y-low includes title-bar height
+/// for SSD windows; the rect is inflated by border_width on all four sides
+/// so snap/cluster math operates on the visible footprint. `None` for
+/// widgets / unmapped / surfaceless.
 fn window_snap_rect(
     space: &Space<Window>,
     decorations: &HashMap<

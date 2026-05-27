@@ -1,13 +1,10 @@
 //! Window clustering — on-demand connected components over snap-adjacency.
+//! The graph is never stored; each query BFSes current geometry, so there's
+//! nothing to rebuild on move/resize/fullscreen/close.
 //!
-//! A *cluster* is the connected component of the focused window in the
-//! snap-adjacency graph — but the graph is never stored. Each query walks
-//! current geometry via BFS, so there's nothing to rebuild when windows move,
-//! resize, fullscreen, close, or get repositioned by external protocols.
-//! "Edge-adjacent" matches the post-tightening semantics of `snap.rs`: two
-//! windows share a side, with strictly positive perpendicular overlap,
-//! separated by exactly `gap` on the parallel axis. Diagonal corner snaps
-//! are intentionally excluded from both snap engage and cluster membership.
+//! "Edge-adjacent" matches `snap.rs` post-tightening: shared side, strictly
+//! positive perpendicular overlap, exactly `gap` on the parallel axis.
+//! Diagonal corner snaps are excluded from snap and cluster membership.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
@@ -23,8 +20,6 @@ pub enum Side {
 }
 
 impl Side {
-    // Kept for slice 2 (resize propagation) — the neighbor's side is always
-    // the opposite of self's side in an edge adjacency.
     #[allow(dead_code)]
     pub fn opposite(self) -> Side {
         match self {
@@ -36,19 +31,10 @@ impl Side {
     }
 }
 
-/// Which side of `a` is edge-adjacent to `b`? Returns `None` if the two
-/// rectangles don't share an edge.
-///
-/// "Edge-adjacent" means: on one parallel coordinate, the relevant edge of
-/// `a` equals the opposite edge of `b` shifted by `gap` (within `EPS`), AND
-/// the perpendicular extents strictly overlap. Strict overlap rejects both
-/// corner-touches (zero shared length) and diagonal corner snaps where the
-/// two windows are flush-with-gap on both axes simultaneously.
-///
-/// `EPS` is inclusive (`<= EPS`): positions are always integer-valued in
-/// production (cast from `i32`), so whole-pixel drift introduced by
-/// rounding in fit/unfit, centering, etc. gets absorbed without losing
-/// cluster membership.
+/// Which side of `a` is edge-adjacent to `b`? Edges are flush-with-`gap` on
+/// one axis and strictly overlap on the perpendicular — rejecting corner
+/// touches and diagonal snaps. `EPS=1.0` absorbs whole-pixel drift from
+/// rounding (fit/unfit/center) without dropping cluster membership.
 pub fn adjacent_side(a: &SnapRect, b: &SnapRect, gap: f64) -> Option<Side> {
     const EPS: f64 = 1.0;
 
@@ -75,10 +61,9 @@ pub fn adjacent_side(a: &SnapRect, b: &SnapRect, gap: f64) -> Option<Side> {
     None
 }
 
-/// Axis classification + initial rect for one cluster member, used by the
-/// pure `resolve_cluster_shifts` helper. Production code constructs these
-/// from `ClusterResizeMember` via `alive()` filtering; tests construct them
-/// with literal `SnapRect`s and no smithay dependency.
+/// Axis classification + initial rect for one cluster member. Production
+/// builds these from `ClusterResizeMember`; tests use literal `SnapRect`s
+/// (no smithay dep).
 #[derive(Clone, Copy, Debug)]
 pub struct ResizeClassification {
     pub axis_x: Option<Side>,
@@ -86,34 +71,22 @@ pub struct ResizeClassification {
     pub initial_rect: SnapRect,
 }
 
-/// Compute per-member translation vectors for one motion tick of a cluster
-/// resize.
+/// Per-member translation vectors for one cluster-resize motion tick.
 ///
-/// Three-phase algorithm:
+/// Three phases:
+///   1. **Static shift** — each member with a non-`None` axis takes the
+///      edge delta (`Right→+w`, `Left→-w`, `Bottom→+h`, `Top→-h`).
+///   2. **Bond-driven shift** — for each existing bond `(m, n)`, position
+///      `n` flush with `m`'s leading edge ± gap. Insertion order, no
+///      direction guard: bonded members follow unconditionally including
+///      drag reversal past their initial position.
+///   3. **Push cascade** — looped until stable. Each iteration first
+///      pushes members out of `primary` (if `Some`), then pushes
+///      encroached members between shifted/non-shifted pairs and records
+///      new bonds.
 ///
-/// 1. **Static shift** — each member with a non-`None` axis inherits a
-///    shift from the edge deltas: `Right → +width_delta`,
-///    `Left → -width_delta`, `Bottom → +height_delta`,
-///    `Top → -height_delta`.
-/// 2. **Bond-driven shift** — for each existing bond `(m, n)`, position
-///    `n` flush with `m`'s current leading edge ± gap. Bonds are
-///    processed in insertion order so chains propagate transitively
-///    (A→B before B→C). No direction guard — bonded members follow
-///    unconditionally, including on drag reversal and past their initial
-///    position.
-/// 3. **Push cascade** — looped until stable. At the top of each
-///    iteration, check every member against the primary's current rect
-///    (if `primary` is `Some`) and push any that have been dragged into
-///    it by bonds or prior cascade steps. Then check every shifted
-///    member against every other member and push encroached members,
-///    recording new bonds. The primary check runs each iteration so
-///    members pulled into static primary edges mid-cascade get corrected.
-///
-/// Returns `(shifts, newly_formed_bonds)`. The caller persists
-/// `newly_formed_bonds` into its snapshot so the next frame's phase 2
-/// picks them up.
-/// Return type for `resolve_cluster_shifts`: per-member shifts keyed by
-/// index, plus any newly-formed bonds that the caller persists across frames.
+/// Returns `(shifts, newly_formed_bonds)`; caller persists the bonds so
+/// the next frame's phase 2 sees them.
 pub type ShiftsAndBonds = (HashMap<usize, (i32, i32)>, Vec<(usize, usize)>);
 
 #[allow(clippy::type_complexity)]
@@ -182,16 +155,13 @@ pub fn resolve_cluster_shifts(
         }
     }
 
-    // Only skip the cascade if there is nothing to propagate AND no primary
-    // to check encroachment against (primary push runs inside the cascade).
+    // Skip cascade only if nothing to propagate AND no primary to check
+    // encroachment against (primary push runs inside the cascade).
     if shifts.is_empty() && primary.is_none() {
         return (shifts, empty_bonds);
     }
 
-    // Phase 3: push cascade with bond recording. Primary-vs-member push runs
-    // at the top of every iteration so members dragged into the primary by
-    // bond or cascade shifts get pushed back out before the member-vs-member
-    // inner loop runs.
+    // Phase 3: push cascade with bond recording.
     let mut new_bonds: Vec<(usize, usize)> = Vec::new();
     let mut new_bonds_set: HashSet<(usize, usize)> = HashSet::new();
 
@@ -272,20 +242,14 @@ fn x_overlap(a: &SnapRect, b: &SnapRect) -> bool {
     a.x_low < b.x_high && b.x_low < a.x_high
 }
 
-/// How far should `N` be pushed to maintain `gap` distance from `M`'s
-/// leading edge(s)? Returns `(0, 0)` unless `M`'s motion is encroaching
-/// on `N`.
+/// Push `N` to maintain `gap` from `M`'s leading edge(s). `(0, 0)` unless
+/// `M`'s motion encroaches on `N`.
 ///
-/// The **direction guards** (`n_init.x_low >= m_init.x_high` and friends)
-/// require `N` to sit entirely past `M`'s *leading* edge at grab start.
-/// This prevents a rightward-moving M from pushing a member that merely
-/// overlapped M in x but sat on M's *trailing* side — which would cause
-/// cross-axis cascade oscillation (e.g. an upward-moving C spuriously
-/// pushing the tall A upward because A's y extent happened to overlap C's).
-///
-/// The y_overlap / x_overlap checks operate on the *current* rects
-/// (`m_cur`, `n_cur`) so a member that only y-overlaps M after some
-/// prior cascade step still collides correctly.
+/// Direction guards (`n_init.x_low >= m_init.x_high` etc.) require `N` to
+/// sit entirely past `M`'s leading edge at grab start. Prevents cross-axis
+/// cascade oscillation (an upward-moving C spuriously pushing tall A up
+/// because A's y extent overlapped C's). Overlap checks use *current*
+/// rects so members that only overlap mid-cascade still collide correctly.
 fn compute_push(
     m_init: &SnapRect,
     m_cur: &SnapRect,
@@ -335,14 +299,10 @@ fn compute_push(
     push
 }
 
-/// How far should member `N` be pushed to maintain `gap` from the primary's
-/// current rect?
-///
-/// Checks all four sides independently (no direction guard): the primary's
-/// static edges must also block members that bond-driven or cascade shifts
-/// have dragged into them. `n_init` determines which side the member was
-/// originally on (position guard), so a member that started above the
-/// primary is only pushed up, never down.
+/// Push `N` to maintain `gap` from the primary's current rect. Checks all
+/// four sides independently — primary's static edges must block bond/cascade
+/// shifts too. `n_init` is the position guard (a member originally above
+/// the primary is only pushed up, never down).
 fn compute_push_from_primary(
     p_init: &SnapRect,
     p_cur: &SnapRect,
@@ -352,28 +312,28 @@ fn compute_push_from_primary(
 ) -> (i32, i32) {
     let mut push = (0i32, 0i32);
 
-    // Member was originally to the right: keep n_cur.x_low past p_cur.x_high.
+    // Originally right: keep n_cur.x_low past p_cur.x_high.
     if n_init.x_low >= p_init.x_high && y_overlap(p_cur, n_cur) {
         let encroach = p_cur.x_high + gap - n_cur.x_low;
         if encroach > 0.0 {
             push.0 = encroach.ceil() as i32;
         }
     }
-    // Member was originally to the left: keep n_cur.x_high past p_cur.x_low.
+    // Originally left: keep n_cur.x_high past p_cur.x_low.
     if n_init.x_high <= p_init.x_low && y_overlap(p_cur, n_cur) {
         let encroach = p_cur.x_low - gap - n_cur.x_high;
         if encroach < 0.0 {
             push.0 = encroach.floor() as i32;
         }
     }
-    // Member was originally below: keep n_cur.y_low past p_cur.y_high.
+    // Originally below: keep n_cur.y_low past p_cur.y_high.
     if n_init.y_low >= p_init.y_high && x_overlap(p_cur, n_cur) {
         let encroach = p_cur.y_high + gap - n_cur.y_low;
         if encroach > 0.0 {
             push.1 = encroach.ceil() as i32;
         }
     }
-    // Member was originally above: keep n_cur.y_high past p_cur.y_low.
+    // Originally above: keep n_cur.y_high past p_cur.y_low.
     if n_init.y_high <= p_init.y_low && x_overlap(p_cur, n_cur) {
         let encroach = p_cur.y_low - gap - n_cur.y_high;
         if encroach < 0.0 {
@@ -384,18 +344,14 @@ fn compute_push_from_primary(
     push
 }
 
-/// Connected component of `root` in the snap-adjacency graph of `windows`.
-///
-/// BFS over the edge relation defined by `adjacent_side`. Always contains at
-/// least `root` itself, even if `root` isn't in `windows` or has no
-/// neighbors. Generic over node identity so production code can pass
-/// `smithay::desktop::Window` while tests use `&'static str`.
+/// Connected component of `root` via `adjacent_side` BFS. Always contains
+/// `root` itself. Generic so production passes `smithay::desktop::Window`
+/// and tests use `&'static str`.
 pub fn cluster_of<W>(root: &W, windows: &[(W, SnapRect)], gap: f64) -> HashSet<W>
 where
     W: Clone + Eq + Hash,
 {
-    // O(1) rect lookup per popped node; without this the BFS does a linear
-    // scan per pop, turning O(n²) into O(n²) + O(n²).
+    // O(1) rect lookup per popped node — without this BFS goes quadratic.
     let rects: HashMap<&W, &SnapRect> =
         windows.iter().map(|(w, r)| (w, r)).collect();
 

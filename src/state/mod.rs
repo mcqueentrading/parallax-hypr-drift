@@ -83,8 +83,8 @@ use driftwm::window_ext::WindowExt;
 /// alternative (dropping the new window in the middle of an unrelated region).
 const AUTO_PLACE_CLUSTER_THRESHOLD: f64 = 0.33;
 
-/// A layer surface placed at a fixed canvas position (instead of screen-anchored via LayerMap).
-/// Created when a layer surface's namespace matches a window rule with `position`.
+/// A layer surface pinned to a canvas position instead of being anchored
+/// via LayerMap. Created when a layer's namespace matches a rule with `position`.
 pub struct CanvasLayer {
     pub surface: smithay::desktop::LayerSurface,
     /// Rule position (Y-up, window-centered) — converted to canvas coords after first commit.
@@ -94,11 +94,10 @@ pub struct CanvasLayer {
     pub namespace: String,
 }
 
-/// Persistent per-output state for screen recording capture, reused across frames
-/// so the damage tracker's age increments and smithay only re-renders damaged regions.
+/// Per-output screencopy state reused across frames so the damage tracker's
+/// age increments and smithay re-renders only damaged regions.
 pub struct CaptureOutputState {
     pub damage_tracker: OutputDamageTracker,
-    /// Reused offscreen texture for SHM captures (avoids allocation per frame).
     pub offscreen_texture: Option<(GlesTexture, Size<i32, Physical>)>,
     pub age: usize,
     /// Reset age when cursor inclusion changes between frames.
@@ -106,8 +105,8 @@ pub struct CaptureOutputState {
 }
 
 /// Buffered middle-click from a 3-finger tap. Held for DOUBLE_TAP_WINDOW_MS
-/// to see if a 3-finger swipe follows (→ move window). If the timer fires
-/// without a swipe, the click is forwarded to the client (paste).
+/// to see if a 3-finger swipe follows (→ move window); on timeout the click
+/// is forwarded to the client (paste).
 pub struct PendingMiddleClick {
     pub press_time: u32,
     pub release_time: Option<u32>,
@@ -123,7 +122,6 @@ pub enum SessionLock {
     Locked,
 }
 
-/// Log an error result with context, discarding the Ok value.
 #[inline]
 pub(crate) fn log_err(context: &str, result: Result<impl Sized, impl std::fmt::Display>) {
     if let Err(e) = result {
@@ -156,7 +154,7 @@ pub fn spawn_command(cmd: &str, env: &HashMap<String, String>) {
     log_err("spawn command", child.spawn());
 }
 
-/// Saved viewport state for HomeToggle return — includes optional fullscreen window.
+/// Saved viewport state for HomeToggle return, plus the optional fullscreen window to restore.
 #[derive(Clone)]
 pub struct HomeReturn {
     pub camera: Point<f64, Logical>,
@@ -164,7 +162,7 @@ pub struct HomeReturn {
     pub fullscreen_window: Option<Window>,
 }
 
-/// Saved state for a fullscreen window — restored on exit.
+/// Pre-fullscreen geometry + viewport, restored on exit.
 pub struct FullscreenState {
     pub window: Window,
     pub saved_location: Point<i32, Logical>,
@@ -186,7 +184,6 @@ pub struct DndIcon {
     pub offset: Point<i32, Logical>,
 }
 
-/// A queued mode change with bounded retry count for frame-in-flight deferral.
 #[derive(Clone, Debug)]
 pub struct PendingMode {
     pub intent: ModeIntent,
@@ -211,11 +208,9 @@ pub enum ModeIntent {
     Preferred,
 }
 
-/// Per-output viewport state, stored on each `Output` via `UserDataMap`.
-/// Wrapped in `Mutex` since `UserDataMap` requires `Sync`.
-/// Fields that are !Send (PixelShaderElement) stay on DriftWm.
-/// Fields with non-Copy ownership types (fullscreen, lock_surface)
-/// stay on DriftWm for Phase 1 — moved here when multi-output needs them.
+/// Per-output viewport state, stored on each `Output` via `UserDataMap`
+/// (wrapped in `Mutex` since `UserDataMap` requires `Sync`). !Send fields
+/// and non-Copy ownership types (fullscreen, lock_surface) stay on DriftWm.
 #[derive(Clone)]
 pub struct OutputState {
     pub camera: Point<f64, Logical>,
@@ -231,19 +226,16 @@ pub struct OutputState {
     pub edge_pan_velocity: Option<Point<f64, Logical>>,
     pub last_rendered_camera: Point<f64, Logical>,
     pub last_frame_instant: Instant,
-    /// Physical arrangement position in layout space.
-    /// (0,0) for single output; from config for multi-monitor.
+    /// Physical arrangement in layout space: (0,0) for single output,
+    /// from config for multi-monitor.
     pub layout_position: Point<i32, Logical>,
-    /// Saved home position for HomeToggle (per-output).
     pub home_return: Option<HomeReturn>,
-    /// Bumped on every VBlank (or render tick on winit). Used to gate
-    /// frame_callback emission to one-per-cycle per surface — a client
-    /// that ignores vsync (e.g. some Wine games) would otherwise commit
-    /// in a tight loop and pin the compositor's main thread.
+    /// Bumped per VBlank (or render tick on winit). Gates frame_callback
+    /// emission to one-per-cycle per surface so vsync-ignoring clients
+    /// (Wine games) can't pin the main thread.
     pub frame_callback_sequence: u32,
 }
 
-/// Initialize per-output state on a newly created output.
 pub fn init_output_state(
     output: &Output,
     camera: Point<f64, Logical>,
@@ -276,7 +268,6 @@ pub fn init_output_state(
     });
 }
 
-/// Screen-space center of an output's usable area (for per-output animation paths).
 pub fn usable_center_for_output(output: &Output) -> Point<f64, Logical> {
     let map = smithay::desktop::layer_map_for_output(output);
     let zone = map.non_exclusive_zone();
@@ -302,7 +293,6 @@ pub fn output_logical_size(output: &Output) -> Size<i32, Logical> {
         .unwrap_or((1, 1).into())
 }
 
-/// Get a lock on an output's per-output state.
 pub fn output_state(output: &Output) -> MutexGuard<'_, OutputState> {
     output
         .user_data()
@@ -314,17 +304,14 @@ pub fn output_state(output: &Output) -> MutexGuard<'_, OutputState> {
 
 /// Central compositor state.
 pub struct DriftWm {
-    // -- global: infrastructure --
     pub start_time: Instant,
     pub display_handle: DisplayHandle,
     pub loop_handle: LoopHandle<'static, DriftWm>,
     pub loop_signal: LoopSignal,
 
-    // -- global: desktop --
     pub space: Space<Window>,
     pub popups: PopupManager,
 
-    // -- global: protocol state --
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
@@ -333,16 +320,12 @@ pub struct DriftWm {
     pub seat_state: SeatState<DriftWm>,
     pub data_device_state: DataDeviceState,
 
-    // -- global: input --
     pub seat: Seat<DriftWm>,
 
-    // -- global: cursor --
     pub cursor: CursorState,
     pub dnd_icon: Option<DndIcon>,
 
-    // -- global: backend --
     pub backend: Option<Backend>,
-    // -- global: SSD decorations --
     pub decorations: HashMap<
         smithay::reexports::wayland_server::backend::ObjectId,
         crate::decorations::WindowDecoration,
@@ -352,15 +335,12 @@ pub struct DriftWm {
     /// output scale. One buffer rendered at this density serves every output
     /// (downscaling stays crisp; only upscaling blurs).
     pub decoration_scale: i32,
-    // -- global: render state (shaders, blur, backgrounds, captures) --
     pub render: RenderCache,
 
-    // -- global: protocol state (held for smithay delegate macros) --
     pub dmabuf_state: DmabufState,
     pub dmabuf_global: Option<DmabufGlobal>,
-    /// DRM render-node `dev_t` and DMA-BUF formats accepted by the renderer.
-    /// `None` on the winit backend (nested compositor — no direct DRM device).
-    /// Used by ext-image-copy-capture to advertise DMA-BUF constraints.
+    /// DRM render-node `dev_t` and DMA-BUF formats. `None` on winit (nested
+    /// compositor has no direct DRM device). Used by ext-image-copy-capture.
     pub render_device: Option<u64>,
     pub render_dmabuf_formats:
         Option<smithay::backend::allocator::format::FormatSet>,
@@ -385,9 +365,9 @@ pub struct DriftWm {
     pub security_context_state: SecurityContextState,
     #[allow(dead_code)]
     pub idle_inhibit_state: IdleInhibitManagerState,
-    /// Surfaces holding zwp-idle-inhibit-v1 inhibitors. Refreshed each frame:
-    /// only surfaces actively scanning out (visible) count, so a hidden
-    /// browser tab playing video doesn't keep the screen awake.
+    /// Surfaces holding zwp-idle-inhibit-v1 inhibitors. Only those actively
+    /// scanning out count, so a hidden browser tab playing video can't keep
+    /// the screen awake.
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub idle_notifier_state: IdleNotifierState<DriftWm>,
     #[allow(dead_code)]
@@ -401,12 +381,11 @@ pub struct DriftWm {
     pub screencopy_state: driftwm::protocols::screencopy::ScreencopyManagerState,
     pub output_management_state: driftwm::protocols::output_management::OutputManagementState,
     pub output_power_state: driftwm::protocols::output_power::OutputPowerState,
-    /// Outputs currently in DPMS off. Render loop skips these; protocol query
-    /// returns this state. Cleared on output disconnect.
+    /// Outputs currently in DPMS off; render loop skips these.
     pub dpms_off_outputs: HashSet<Output>,
-    /// Client-requested DPMS transitions awaiting application in the udev render
-    /// loop (we can't touch the DRM compositor from the wayland dispatch — it
-    /// lives behind an Rc<RefCell<>> in calloop closures).
+    /// Client-requested DPMS transitions awaiting the udev render loop —
+    /// can't touch DrmCompositor from wayland dispatch (it lives behind
+    /// Rc<RefCell<>> in calloop closures).
     pub pending_dpms: HashMap<Output, bool>,
     pub pending_screencopies: Vec<driftwm::protocols::screencopy::Screencopy>,
     #[allow(dead_code)]
@@ -423,78 +402,59 @@ pub struct DriftWm {
     pub session_lock_manager_state: SessionLockManagerState,
     pub gamma_control_manager_state: driftwm::protocols::gamma_control::GammaControlManagerState,
     pub session_lock: SessionLock,
-    // -- per-output: lock surface (one per output in multi-monitor) --
     pub lock_surfaces: HashMap<Output, LockSurface>,
 
-    // -- global: pointer/layer state --
     pub pointer_over_layer: bool,
     pub canvas_layers: Vec<CanvasLayer>,
 
-    // -- global: config --
     pub config: Config,
 
-    // -- global: window management --
     pub pending_center: HashSet<WlSurface>,
     pub pending_size: HashSet<WlSurface>,
     /// Surfaces that requested set_maximized / set_fullscreen before their
-    /// first sized commit. Applied after first-commit positioning runs, so
-    /// `restore_size` / `saved_size` get captured from the client's
-    /// preferred geometry rather than (0,0).
+    /// first sized commit. Deferred until after first-commit positioning so
+    /// `restore_size` / `saved_size` capture the client's preferred geometry.
     pub pending_fit: HashSet<WlSurface>,
     pub pending_fullscreen: HashSet<WlSurface>,
-    /// Snapshot of the keyboard's focused window at `new_toplevel` time,
-    /// keyed by the new surface. Used by `auto_placement_pos` to anchor
-    /// against whatever the user was working with — *before* `new_toplevel`
-    /// auto-set focus to the new surface. `Some(None)` means the user
-    /// explicitly had no focus (e.g. clicked empty canvas), so auto-placement
-    /// falls back to center; missing entry means the snapshot was already
-    /// consumed.
+    /// Keyboard focus snapshot captured at `new_toplevel` time, keyed by the
+    /// new surface. `Some(None)` means user had no focus (e.g. clicked empty
+    /// canvas); missing entry means snapshot was already consumed.
     pub auto_anchor_snapshot: HashMap<WlSurface, Option<Window>>,
-    /// After unfit, re-center the window around `target_center` once its
-    /// reported geometry actually changes from `pre_exit_size` — handles
-    /// clients (Chromium) whose post-unfit size is smaller than what we
-    /// configured. Waiting for the size change avoids firing while the
-    /// client is still reporting the fit-era geometry.
+    /// After unfit, re-center around `target_center` once geometry actually
+    /// shrinks from `pre_exit_size`. Waiting avoids firing while the client
+    /// (Chromium) still reports the fit-era size.
     pub pending_recenter:
         HashMap<smithay::reexports::wayland_server::backend::ObjectId, PendingRecenter>,
-    /// Last "settled" snap rect per window, captured at initial map and at
-    /// move/resize grab end. Used as the authoritative rect for cluster
-    /// computation in `toplevel_destroyed` — protects against clients
-    /// (notably foot) that shrink/reposition their buffer during the destroy
-    /// sequence, which would otherwise break neighbor detection.
+    /// Last "settled" snap rect per window, captured at initial map and
+    /// move/resize grab end. Used as authoritative rect in
+    /// `toplevel_destroyed` — protects against clients (foot) that
+    /// shrink/reposition their buffer during destroy.
     pub stable_snap_rects: HashMap<
         smithay::reexports::wayland_server::backend::ObjectId,
         driftwm::layout::snap::SnapRect,
     >,
 
-    // -- global: focus/navigation --
     pub focus_history: Vec<Window>,
     pub cycle_state: Option<usize>,
 
-    // -- global: key repeat --
     pub held_action: Option<(u32, driftwm::config::Action, Instant)>,
 
-    // Keycodes whose press was intercepted by a binding. Their releases must
-    // also be intercepted, otherwise the focused client receives a "release
-    // without press" — games / Discord / state-tracking apps break, and
-    // launchers leak the trigger key into the previously focused window.
+    /// Keycodes whose press was intercepted by a binding. Their releases must
+    /// also be intercepted, otherwise the focused client receives a "release
+    /// without press" — games / Discord / state-tracking apps break, and
+    /// launchers leak the trigger key into the previously focused window.
     pub suppressed_keys: HashSet<u32>,
 
-    // -- per-output: fullscreen (keyed by output, since FullscreenState has Window) --
     pub fullscreen: HashMap<Output, FullscreenState>,
 
-    // -- global: gesture state --
     pub gesture_state: Option<GestureState>,
     pub pending_middle_click: Option<PendingMiddleClick>,
 
-    // -- global: momentum launch timer --
     pub momentum_timer: Option<RegistrationToken>,
 
-    // -- global: session --
     pub session: Option<LibSeatSession>,
     pub input_devices: Vec<smithay::reexports::input::Device>,
 
-    // -- global: state file persistence --
     pub state_file_cameras: HashMap<String, (Point<f64, Logical>, f64)>,
     pub state_file_last_write: Instant,
     /// Active XKB layout name (e.g. "English (US)"), updated on key events.
@@ -503,48 +463,39 @@ pub struct DriftWm {
     pub state_file_windows: Vec<persistence::WindowFingerprint>,
     pub state_file_layer_count: usize,
 
-    // -- global: autostart --
     pub autostart: Vec<String>,
 
-    // -- global: udev/DRM --
-    /// Outputs whose CRTC is currently active (driven by the backend).
-    /// Used as the universe for [`Self::mark_all_dirty`].
+    /// Outputs whose CRTC is currently active. Universe for [`Self::mark_all_dirty`].
     pub active_outputs: HashSet<Output>,
-    /// Outputs that need to render on the next backend tick.
     pub redraws_needed: HashSet<Output>,
     pub frames_pending: HashSet<crtc::Handle>,
     /// One-shot timers armed when queue_frame returned EmptyFrame so the loop
     /// still wakes at ~refresh rate to advance animations (e.g. xcursor frames).
     pub estimated_vblank_timers: HashMap<crtc::Handle, RegistrationToken>,
 
-    // -- global: config hot-reload --
     pub config_file_mtime: Option<std::time::SystemTime>,
 
-    // -- global: multi-monitor --
-    /// Global animation tick timestamp — used for dt computation in tick_all_animations().
-    /// Separate from per-output last_frame_instant to avoid double-ticking when multiple
-    /// outputs render in one iteration.
+    /// Global animation tick timestamp — separate from per-output
+    /// last_frame_instant to avoid double-ticking when multiple outputs
+    /// render in one iteration.
     pub last_animation_tick: Instant,
-    /// The output the pointer is currently on (for input routing).
+    /// Output the pointer is on (for input routing).
     pub focused_output: Option<Output>,
-    /// The output a gesture started on (pinned for duration of gesture).
+    /// Output a gesture started on (pinned for the gesture's duration).
     pub gesture_output: Option<Output>,
-    /// Fullscreen window that was exited by a gesture (saved before execute_action sees it).
+    /// Fullscreen window exited by a gesture (saved before execute_action runs).
     pub gesture_exited_fullscreen: Option<Window>,
-    /// Output names kept as virtual placeholders when all physical outputs disconnect.
-    /// Prevents `active_output().unwrap()` panics by keeping the output in the Space.
+    /// Virtual output placeholders kept when all physical outputs disconnect,
+    /// so `active_output().unwrap()` doesn't panic.
     pub disconnected_outputs: HashSet<String>,
-    /// Set when output config was applied via wlr-output-management; render loop
-    /// should re-collect output state and notify clients.
+    /// Set when output config was applied via wlr-output-management; render
+    /// loop re-collects output state and notifies clients.
     pub output_config_dirty: bool,
-    /// Queued mode-change requests from wlr-output-management Apply or config
-    /// reload. Drained by the udev backend's render loop, which resolves each
-    /// intent to a concrete `control::Mode` and calls `DrmCompositor::use_mode`.
-    /// Keyed by output name (handler doesn't know CRTCs; backend resolves on
-    /// drain).
+    /// Mode-change requests from wlr-output-management Apply or config reload.
+    /// Drained by the udev render loop, which resolves each intent to a
+    /// concrete `control::Mode`. Keyed by output name; backend resolves CRTCs.
     pub pending_mode_changes: HashMap<String, PendingMode>,
 
-    // -- global: xwayland-satellite (on-demand X11 socket integration) --
     pub satellite: Option<crate::xwayland::Satellite>,
 
     /// Udev backend handle (Rc — cloneable). Single owner here; render loop
@@ -552,20 +503,17 @@ pub struct DriftWm {
     /// `None` when the winit backend is in use.
     pub udev_device: Option<crate::backend::udev::UdevDevice>,
 
-    // -- global: SSD title bar double-click --
     pub last_titlebar_click: Option<(
         Instant,
         smithay::reexports::wayland_server::backend::ObjectId,
     )>,
 }
 
-/// Per-client state stored by wayland-server for each connected client.
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
-    /// Clients connected via a security-context listener are denied access to
-    /// privileged protocols (screencopy, foreign-toplevel, virtual keyboard,
-    /// etc.). See SecurityContextHandler.
+    /// True for clients connected via a security-context listener; denied
+    /// privileged protocols (screencopy, foreign-toplevel, virtual keyboard).
     pub is_restricted: bool,
 }
 
@@ -574,9 +522,6 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
 
-/// Restricted clients (those connecting through a security-context listener)
-/// are denied access to privileged protocols. Clients without a ClientState
-/// are treated as unrestricted.
 pub(crate) fn client_is_unrestricted(
     client: &smithay::reexports::wayland_server::Client,
 ) -> bool {
@@ -586,10 +531,9 @@ pub(crate) fn client_is_unrestricted(
 }
 
 impl DriftWm {
-    /// Drop dead inhibitors and tell the idle-notifier whether any *visible*
-    /// inhibitor surface is currently scanning out. Hidden inhibitors (e.g.
-    /// a background browser tab playing video) don't count, otherwise the
-    /// screen would never lock.
+    /// Drop dead inhibitors and tell idle-notifier whether any *visible*
+    /// inhibitor surface is scanning out. Hidden inhibitors don't count —
+    /// otherwise a backgrounded browser tab would keep the screen awake.
     pub fn refresh_idle_inhibit(&mut self) {
         use smithay::desktop::utils::surface_primary_scanout_output;
         use smithay::wayland::compositor::with_states;
@@ -608,10 +552,9 @@ impl DriftWm {
     /// Called after every `raise_element()` to maintain stacking.
     pub fn enforce_below_windows(&mut self) {
         self.render.blur_geometry_generation += 1;
-        // Space stores elements in a vec where last = topmost.
-        // raise_element pushes to the end (top). So we raise all
-        // non-below windows in reverse order to preserve their relative
-        // stacking while ensuring they sit above any below windows.
+        // Space stores elements with last = topmost, and raise_element appends.
+        // Raise non-below windows in reverse to keep their relative stacking
+        // while ensuring they sit above any below windows.
         let non_below: Vec<_> = self
             .space
             .elements()
@@ -627,8 +570,7 @@ impl DriftWm {
             self.space.raise_element(&w, false);
         }
 
-        // Parent-child stacking: raise children after their parents so
-        // they always appear on top. Works naturally for nested hierarchies.
+        // Raise children after parents so nested hierarchies stack correctly.
         let parented: Vec<Window> = self
             .space
             .elements()
@@ -644,7 +586,6 @@ impl DriftWm {
         }
     }
 
-    /// Find the Window in space whose wl_surface matches the given one.
     pub fn window_for_surface(&self, surface: &WlSurface) -> Option<Window> {
         self.space
             .elements()
@@ -652,9 +593,9 @@ impl DriftWm {
             .cloned()
     }
 
-    /// Get the innermost modal child of a window (for focus redirect).
-    /// Recursively chases modal chains (e.g. file picker → overwrite confirm).
-    /// Capped at 10 iterations to guard against circular parents.
+    /// Innermost modal descendant for focus redirect. Chases modal chains
+    /// (e.g. file picker → overwrite confirm); capped at 10 to guard against
+    /// circular parents.
     pub fn topmost_modal_child(&self, window: &Window) -> Option<Window> {
         let parent_surface = window.wl_surface()?;
         let child = self
@@ -679,8 +620,7 @@ impl DriftWm {
             .or(Some(child))
     }
 
-    /// Raise a window and set keyboard focus, with modal focus redirect.
-    /// If the window has a modal child, focus goes to that child instead.
+    /// Raise a window and focus it (or its innermost modal child).
     pub fn raise_and_focus(&mut self, window: &Window, serial: smithay::utils::Serial) {
         self.space.raise_element(window, true);
         self.enforce_below_windows();
@@ -694,16 +634,14 @@ impl DriftWm {
         keyboard.set_focus(self, focus_surface, serial);
     }
 
-    /// Mark every active output as needing a redraw.
     pub fn mark_all_dirty(&mut self) {
         self.redraws_needed.clone_from(&self.active_outputs);
     }
 
-    /// Mark every output that currently displays `surface` (or its root toplevel /
-    /// hosting layer / lock output) as needing a redraw. Falls back to
-    /// [`Self::mark_all_dirty`] when the surface can't be resolved to a specific
-    /// output — covers DnD icons, orphan popups, and the brief window between
-    /// a toplevel's first commit and its space mapping.
+    /// Mark every output displaying `surface` (or its root toplevel / hosting
+    /// layer / lock output) as needing a redraw. Falls back to
+    /// [`Self::mark_all_dirty`] when the surface can't be resolved — covers
+    /// DnD icons, orphan popups, and pre-mapping toplevels.
     pub fn mark_dirty_for_surface(&mut self, surface: &WlSurface) {
         use smithay::desktop::{WindowSurfaceType, layer_map_for_output};
         use smithay::wayland::compositor::get_parent;
@@ -722,12 +660,11 @@ impl DriftWm {
             .cloned()
             && let Some(win_bbox) = self.space.element_bbox(&window)
         {
-            // Test against each output's zoom-aware visible canvas rect rather
-            // than `Space::outputs_for_element`, which uses the cached mode-sized
-            // output geometry and so undercounts at zoom < 1 (window visible only
-            // via zoom-out would be missed) and overcounts at zoom > 1 (harmless).
-            // Use bbox (not geometry) so popups that extend past the toplevel still
-            // damage the right outputs — matches smithay's own refresh semantics.
+            // Use zoom-aware visible canvas rect rather than
+            // `Space::outputs_for_element`: the latter is built on the cached
+            // mode-sized output geometry, which undercounts at zoom < 1.
+            // bbox (not geometry) ensures popups extending past the toplevel
+            // still damage the right outputs — matches smithay's refresh semantics.
             let mut hit_any = false;
             for output in &outputs {
                 let (cam, zoom) = {
@@ -773,7 +710,6 @@ impl DriftWm {
         self.cursor.is_animated()
     }
 
-    /// True if a specific output has per-output animations in progress.
     pub fn output_has_active_animations(&self, output: &Output) -> bool {
         let os = output_state(output);
         os.camera_target.is_some()
@@ -783,7 +719,6 @@ impl DriftWm {
             || os.momentum.velocity.y != 0.0
     }
 
-    /// True if any animation is still in progress and needs continued rendering.
     pub fn has_active_animations(&self) -> bool {
         self.space
             .outputs()
@@ -794,7 +729,6 @@ impl DriftWm {
             || self.cursor.is_animated()
     }
 
-    /// Forward a buffered middle-click press+release to the client.
     pub fn flush_middle_click(&mut self, press_time: u32, release_time: Option<u32>) {
         let pointer = self.seat.get_pointer().unwrap();
         let serial = smithay::utils::SERIAL_COUNTER.next_serial();
@@ -823,7 +757,7 @@ impl DriftWm {
         }
     }
 
-    /// Flush the pending middle-click (called by calloop timer when no swipe followed).
+    /// Called by the calloop timer when no swipe followed the 3-finger tap.
     pub fn flush_pending_middle_click(&mut self) {
         let Some(pending) = self.pending_middle_click.take() else {
             return;
@@ -831,32 +765,28 @@ impl DriftWm {
         self.flush_middle_click(pending.press_time, pending.release_time);
     }
 
-    /// The output the pointer is currently on.
-    /// Returns `focused_output` with fallback to first output.
+    /// The output the pointer is currently on; falls back to the first output.
     pub fn active_output(&self) -> Option<Output> {
         self.focused_output
             .clone()
             .or_else(|| self.space.outputs().next().cloned())
     }
 
-    /// Get the fullscreen state for the active output (if any).
     pub fn active_fullscreen(&self) -> Option<&FullscreenState> {
         self.active_output().and_then(|o| self.fullscreen.get(&o))
     }
 
-    /// Check if the active output is in fullscreen mode.
     pub fn is_fullscreen(&self) -> bool {
         self.active_output()
             .is_some_and(|o| self.fullscreen.contains_key(&o))
     }
 
-    /// Check if a specific output is in fullscreen mode.
     pub fn is_output_fullscreen(&self, output: &Output) -> bool {
         self.fullscreen.contains_key(output)
     }
 
-    /// Find the output whose viewport contains (or is nearest to) a window's center.
-    /// Falls back to active output if the window isn't visible on any output.
+    /// Output whose viewport contains the window's center, or the active
+    /// output if the window isn't visible on any.
     pub fn output_for_window(&self, window: &smithay::desktop::Window) -> Option<Output> {
         let loc = self.space.element_location(window)?;
         let geo = window.geometry();
@@ -864,7 +794,6 @@ impl DriftWm {
             loc.x as f64 + geo.size.w as f64 / 2.0,
             loc.y as f64 + geo.size.h as f64 / 2.0,
         ));
-        // Find which output's visible canvas rect contains the window center.
         let found = self
             .space
             .outputs()
@@ -880,7 +809,6 @@ impl DriftWm {
         found.or_else(|| self.active_output())
     }
 
-    /// Find the nearest output in the given direction from `from`.
     pub fn output_in_direction(
         &self,
         from: &Output,
@@ -913,7 +841,7 @@ impl DriftWm {
                 if dist < 1.0 {
                     return None;
                 }
-                // Check alignment with direction (dot product > 0.5 = within ~60°)
+                // dot > 0.5 ≈ alignment within ~60° of `dir`.
                 let dot = (to_x * dx + to_y * dy) / dist;
                 if dot > 0.5 {
                     Some((o.clone(), dist))
@@ -925,8 +853,8 @@ impl DriftWm {
             .map(|(o, _)| o)
     }
 
-    /// Find which output's layout rectangle contains `pos` in layout space.
-    /// Uses `layout_position` + output mode size (NOT `space.output_geometry()`).
+    /// Output whose layout rectangle contains `pos`. Uses `layout_position` +
+    /// mode size (NOT `space.output_geometry()`, which is zoom-cached).
     pub fn output_at_layout_pos(&self, pos: Point<f64, Logical>) -> Option<Output> {
         self.space
             .outputs()
@@ -943,8 +871,7 @@ impl DriftWm {
             .cloned()
     }
 
-    /// Convert canvas position to layout position via an output's camera/zoom.
-    /// layout_pos = (canvas - camera) * zoom + layout_position
+    /// layout_pos = (canvas - camera) * zoom + layout_position.
     #[cfg(test)]
     pub fn canvas_to_layout_pos(
         canvas_pos: Point<f64, Logical>,
@@ -962,8 +889,7 @@ impl DriftWm {
         ))
     }
 
-    /// Convert layout position to canvas position via an output's camera/zoom.
-    /// canvas = (layout_pos - layout_position) / zoom + camera
+    /// canvas = (layout_pos - layout_position) / zoom + camera.
     #[cfg(test)]
     pub fn layout_to_canvas_pos(
         layout_pos: Point<f64, Logical>,
@@ -977,14 +903,9 @@ impl DriftWm {
     }
 
     /// Batch-access per-output state under a single mutex lock. Returns
-    /// `None` (and does not invoke `f`) when there is no active output —
-    /// i.e. all physical outputs disconnected and no virtual placeholder is
-    /// present yet. The closure runs at most once: any `OutputState`
-    /// mutations inside it are silently dropped on the no-output branch.
-    /// Callers that just want side effects can discard the `Option<()>` —
-    /// the no-op is the desired behavior, since per-output state has no
-    /// meaning while no output exists. Callers that extract a value should
-    /// provide a fallback (e.g. `unwrap_or(1.0)` for zoom).
+    /// `None` (skipping `f`) when there's no active output — per-output state
+    /// has no meaning then. Value-returning callers should provide a fallback
+    /// (e.g. `unwrap_or(1.0)` for zoom).
     pub fn with_output_state<R>(
         &mut self,
         f: impl FnOnce(&mut OutputState) -> R,
@@ -994,11 +915,9 @@ impl DriftWm {
         Some(f(&mut guard))
     }
 
-    // -- Per-output field accessors (delegate to active output's OutputState).
-    // All getters fall back to a sensible default when no output exists; all
-    // setters silently no-op. Hotplug/lid-close races briefly leave the
-    // compositor with zero outputs — these accessors must not panic then.
-
+    // Per-output field accessors. Getters fall back to a sensible default
+    // when no output exists; setters silently no-op. Hotplug/lid-close races
+    // briefly leave the compositor with zero outputs — must not panic then.
     pub fn camera(&self) -> Point<f64, Logical> {
         self.active_output()
             .map(|o| output_state(&o).camera)
@@ -1010,7 +929,7 @@ impl DriftWm {
         }
     }
     pub fn zoom(&self) -> f64 {
-        // 1.0 (not 0.0) so callers like `step / zoom` don't divide by zero.
+        // 1.0 default (not 0.0) avoids divide-by-zero in `step / zoom` callers.
         self.active_output()
             .map(|o| output_state(&o).zoom)
             .unwrap_or(1.0)
@@ -1088,8 +1007,8 @@ impl DriftWm {
         }
     }
 
-    /// Sync each output's position to its camera, so render_output
-    /// automatically applies the canvas→screen transform.
+    /// Sync each output's position to its camera so render_output
+    /// applies the canvas→screen transform.
     pub fn update_output_from_camera(&mut self) {
         let mut changed = false;
         for output in self.space.outputs().cloned().collect::<Vec<_>>() {
@@ -1104,7 +1023,6 @@ impl DriftWm {
         }
     }
 
-    /// Logical viewport size of the active (pointer-focused) output.
     pub fn get_viewport_size(&self) -> Size<i32, Logical> {
         self.active_output()
             .map(|o| output_logical_size(&o))
@@ -1121,8 +1039,7 @@ impl DriftWm {
             .unwrap_or_else(|| Rectangle::new((0, 0).into(), (1, 1).into()))
     }
 
-    /// Screen-space center of the usable area (accounts for panel exclusive zones).
-    /// Without panels, equals (viewport.w/2, viewport.h/2).
+    /// Screen-space center of the usable area (= viewport center when no panels exist).
     pub fn usable_center_screen(&self) -> Point<f64, Logical> {
         let usable = self.get_usable_area();
         Point::from((
@@ -1131,7 +1048,6 @@ impl DriftWm {
         ))
     }
 
-    /// Center of the active output's viewport expressed in canvas coordinates.
     pub fn viewport_center_canvas(&self) -> Point<f64, Logical> {
         let vc = self.usable_center_screen();
         let camera = self.camera();
@@ -1139,8 +1055,8 @@ impl DriftWm {
         Point::from((camera.x + vc.x / zoom, camera.y + vc.y / zoom))
     }
 
-    /// Currently keyboard-focused window, if any.
-    /// Does not filter widgets — pair with `.filter(|w| !w.is_widget())` when needed.
+    /// Keyboard-focused window. Does not filter widgets — pair with
+    /// `.filter(|w| !w.is_widget())` if needed.
     pub fn focused_window(&self) -> Option<Window> {
         let keyboard = self.seat.get_keyboard()?;
         let focus = keyboard.current_focus()?;
@@ -1150,7 +1066,6 @@ impl DriftWm {
             .cloned()
     }
 
-    /// SSD title bar height for a window (0 for CSD/minimal).
     pub fn window_ssd_bar(&self, window: &Window) -> i32 {
         window
             .wl_surface()
@@ -1158,9 +1073,8 @@ impl DriftWm {
             .map_or(0, |_| self.config.decorations.title_bar_height)
     }
 
-    /// Recompute `decoration_scale` from the current outputs. Call after any
-    /// output add/remove/scale change so SSD buffers re-render at the right
-    /// pixel density on the next frame.
+    /// Recompute `decoration_scale` from current outputs. Call after output
+    /// add/remove/scale change so SSD buffers re-render at the right density.
     pub fn recompute_decoration_scale(&mut self) {
         let max_scale = self
             .space
@@ -1170,10 +1084,9 @@ impl DriftWm {
         self.decoration_scale = max_scale.ceil() as i32;
     }
 
-    /// Effective border width for a window, resolving per-window rule
-    /// override against the global `[decorations] border_width`. Returns 0
-    /// when the effective decoration mode is `None` (hard veto — per-window
-    /// overrides are ignored in that case).
+    /// Per-window border width, resolving rule override against
+    /// `[decorations] border_width`. Returns 0 when the effective decoration
+    /// mode is `None` (hard veto — per-window overrides ignored).
     pub fn window_border_width(&self, surface: &WlSurface) -> i32 {
         let applied = driftwm::config::applied_rule(surface);
         let mode = driftwm::config::effective_decoration_mode(
@@ -1187,7 +1100,7 @@ impl DriftWm {
         )
     }
 
-    /// Visual center of a window, accounting for SSD title bar above content.
+    /// Visual center accounting for SSD title bar above content.
     pub fn window_visual_center(&self, window: &Window) -> Option<Point<f64, Logical>> {
         let loc = self.space.element_location(window)?;
         let size = window.geometry().size;
@@ -1198,8 +1111,7 @@ impl DriftWm {
         )))
     }
 
-    /// Whether at least `threshold` of the window's area is currently inside
-    /// the viewport. Returns false if the window isn't placed.
+    /// True if at least `threshold` of the window's area is inside the viewport.
     pub fn window_visible_at_least(&self, window: &Window, threshold: f64) -> bool {
         let Some(loc) = self.space.element_location(window) else {
             return false;
@@ -1213,11 +1125,9 @@ impl DriftWm {
         ) >= threshold
     }
 
-    /// Spawn position for `placement = "cursor"`: center the visual frame
+    /// Spawn pos for `placement = "cursor"`: center the visual frame
     /// (titlebar + content) on the cursor, clamped to the active output's
-    /// usable canvas rect so the new window is fully visible without panning.
-    /// `bar` is the SSD title-bar height (0 for CSD/minimal).
-    /// Returns `None` if there is no active output.
+    /// usable rect. `bar` is SSD title-bar height (0 for CSD/minimal).
     pub fn cursor_placement_pos(
         &self,
         window_size: Size<i32, Logical>,
@@ -1228,7 +1138,7 @@ impl DriftWm {
         let pointer = self.seat.get_pointer()?;
         let cursor = pointer.current_location();
 
-        // Active output's usable area is screen-local; convert to canvas coords.
+        // usable area is screen-local; convert to canvas coords.
         let usable = self.get_usable_area();
         let zoom = self.zoom();
         let camera = self.camera();
@@ -1254,29 +1164,24 @@ impl DriftWm {
         Some((x.round() as i32, y.round() as i32))
     }
 
-    /// Spawn position for `placement = "auto"`: snap-place adjacent to the
-    /// focused window's cluster. Returns the new window's content top-left
-    /// (already shifted down by `bar` so the visual frame snaps to the
-    /// neighbor). `None` when there's no eligible focused window or no
-    /// valid placement was found — the caller should fall back to center.
+    /// Spawn pos for `placement = "auto"`: snap-place adjacent to the focused
+    /// window's cluster. Returns content top-left (shifted down by `bar` so
+    /// the visual frame snaps to the neighbor). `None` on no eligible focus
+    /// or no valid placement; caller falls back to center.
     ///
-    /// `new_window` is excluded from both the anchor search and the obstacle
-    /// list. New toplevels are initially mapped at the viewport center and
-    /// inserted at the front of `focus_history` (via `keyboard.set_focus`)
-    /// before this method runs, so without the skip we'd anchor the new
-    /// window against itself — explaining the (own_w + gap, 0) offset.
+    /// `new_window` is excluded from anchor search and obstacle list. Without
+    /// the skip we'd anchor the new window against itself, since by the time
+    /// this runs `new_window` is already at the viewport center and front of
+    /// `focus_history`.
     pub fn auto_placement_pos(
         &self,
         new_window: &Window,
         new_size: Size<i32, Logical>,
         bar: i32,
     ) -> Option<(i32, i32)> {
-        // Anchor = whatever the keyboard was focused on at `new_toplevel`
-        // time, captured before we auto-set focus to the new surface.
-        // `None` for the entry (or absent entry) means no anchor — caller
-        // falls back to center. The snapshot was captured before
-        // `new_window`'s surface existed in keyboard focus, so it never
-        // points at the new window itself.
+        // Anchor = keyboard focus at `new_toplevel` time, snapshotted before
+        // focus was reassigned to the new surface. `None` (or absent) means
+        // no anchor and caller falls back to center.
         let new_surface = new_window.wl_surface()?.into_owned();
         let focused = self.auto_anchor_snapshot.get(&new_surface)?.as_ref()?;
         let widget = focused
@@ -1288,20 +1193,15 @@ impl DriftWm {
             return None;
         }
 
-        // Only anchor to focused if enough of it is visible that the user
-        // can plausibly be working on its cluster. The threshold is lower
-        // than `CenterNearest` because here we err toward growing an
-        // existing cluster — random new-window placement is the more
-        // disruptive failure mode. When the user has panned mostly away,
-        // they intend a fresh cluster — caller falls back to center placement.
+        // Only anchor when enough of the focused window is visible that the
+        // user is plausibly working on its cluster; otherwise they intend a
+        // fresh cluster and caller falls back to center.
         if !self.window_visible_at_least(focused, AUTO_PLACE_CLUSTER_THRESHOLD) {
             return None;
         }
 
-        // Widgets (xdg-toplevel and canvas layer-shell) are visually below
-        // windows like wallpaper — auto placement ignores them entirely,
-        // neither as anchors nor as obstacles. New windows are free to
-        // land on top, same as on the canvas background.
+        // Widgets sit visually below windows (wallpaper-like) — neither
+        // anchors nor obstacles for auto placement.
         let mut rects: Vec<driftwm::layout::auto_placement::Rect> = Vec::new();
         let mut eligible: HashSet<usize> = HashSet::new();
         let mut focused_idx: Option<usize> = None;
@@ -1358,9 +1258,8 @@ impl DriftWm {
             self.config.snap_gap,
         )?;
 
-        // place_auto returns frame top-left (above the SSD title bar and
-        // outside the border). Shift right by border, down by border + bar
-        // to reach the content top-left.
+        // place_auto returns frame top-left (outside border, above title bar);
+        // shift inward to content top-left.
         let bw_i = new_bw as i32;
         Some((
             pos.0.round() as i32 + bw_i,
@@ -1368,8 +1267,8 @@ impl DriftWm {
         ))
     }
 
-    /// Offset a spawn position so it doesn't overlap an existing window.
-    /// Walks in diagonal steps (title bar height) until no window is within a few pixels.
+    /// Walk a spawn position in title-bar-sized diagonal steps until it
+    /// doesn't sit on top of an existing window.
     pub fn cascade_position(&self, mut pos: (i32, i32), skip: &Window) -> (i32, i32) {
         let step = self.config.decorations.title_bar_height;
         loop {

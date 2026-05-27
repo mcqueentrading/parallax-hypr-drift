@@ -16,22 +16,18 @@ use crate::state::{DriftWm, FocusTarget, output_state};
 /// "click" (deselect) rather than a "drag" (pan). 5px → 25.
 const CLICK_THRESHOLD_SQ: f64 = 25.0;
 
-/// Pointer grab that pans the viewport camera with momentum.
-/// Triggered by Super+left-click or left-click on empty canvas.
-/// Accumulates momentum during drag so the viewport coasts on release.
+/// Pointer grab that pans the viewport camera with momentum. Triggered by
+/// Super+left-click or left-click on empty canvas; accumulates momentum so
+/// the viewport coasts on release.
 pub struct PanGrab {
     pub start_data: GrabStartData<DriftWm>,
-    /// Screen-local position of the pointer last frame.
-    /// Delta between consecutive screen positions drives the pan.
     pub last_screen_pos: Point<f64, Logical>,
-    /// Screen position at grab start — compared on release to decide
-    /// click (unfocus) vs drag (preserve focus).
+    /// Position at grab start — compared on release to decide click vs drag.
     pub start_screen_pos: Point<f64, Logical>,
-    /// Whether this grab started on empty canvas (not mod+click on a window).
     pub from_empty_canvas: bool,
-    /// Set to true once pointer moves beyond CLICK_THRESHOLD from start.
+    /// True once pointer has moved past CLICK_THRESHOLD from start.
     pub dragged: bool,
-    /// Output this grab is pinned to (uses its camera/zoom throughout).
+    /// Output this grab is pinned to; uses its camera/zoom throughout.
     pub output: Output,
 }
 
@@ -43,7 +39,6 @@ impl PointerGrab<DriftWm> for PanGrab {
         _focus: Option<(<DriftWm as SeatHandler>::PointerFocus, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
-        // Use pinned output's camera/zoom
         let (camera, zoom) = {
             let os = output_state(&self.output);
             (os.camera, os.zoom)
@@ -59,7 +54,6 @@ impl PointerGrab<DriftWm> for PanGrab {
         data.drift_pan_on(camera_delta, &self.output);
         self.last_screen_pos = current_screen_pos;
 
-        // Track whether we've moved enough to count as a drag
         if !self.dragged {
             let dx = current_screen_pos.x - self.start_screen_pos.x;
             let dy = current_screen_pos.y - self.start_screen_pos.y;
@@ -68,7 +62,7 @@ impl PointerGrab<DriftWm> for PanGrab {
             }
         }
 
-        // Shift pointer canvas position so cursor stays at the same screen spot
+        // Shift pointer canvas position so the cursor stays at the same screen spot.
         let adjusted = MotionEvent {
             location: event.location + camera_delta,
             serial: event.serial,
@@ -85,15 +79,14 @@ impl PointerGrab<DriftWm> for PanGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            // Click on empty canvas without dragging → unfocus
-            // Must happen BEFORE unset_grab — unset() runs while the pointer
-            // mutex is held, so accessing the seat there would deadlock.
+            // Click-without-drag on empty canvas → unfocus. Must run BEFORE
+            // unset_grab — unset() holds the pointer mutex and the seat
+            // access would deadlock there.
             if self.from_empty_canvas && !self.dragged {
                 let serial = SERIAL_COUNTER.next_serial();
                 let keyboard = data.seat.get_keyboard().unwrap();
                 keyboard.set_focus(data, None::<FocusTarget>, serial);
             }
-            // Release panning lock and launch momentum so the viewport coasts
             data.set_panning(false);
             data.launch_momentum_on(&self.output);
             handle.unset_grab(self, data, event.serial, event.time, true);

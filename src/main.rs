@@ -20,7 +20,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // exec'd children.
     signals::block_early()?;
 
-    // Initialize logging (RUST_LOG=info by default)
     if std::env::var("RUST_LOG").is_err() {
         unsafe { std::env::set_var("RUST_LOG", "info") };
     }
@@ -33,20 +32,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // --check-config: validate config and exit
     if std::env::args().any(|a| a == "--check-config") {
         let _config = driftwm::config::Config::load();
         tracing::info!("Config OK");
         return Ok(());
     }
 
-    // --config <path>: override config file location (useful for nested/test sessions).
-    // Sets DRIFTWM_CONFIG env var which Config::load() reads.
+    // --config <path>: override config file (useful for nested/test sessions).
     if let Some(path) = std::env::args().skip_while(|a| a != "--config").nth(1) {
         unsafe { std::env::set_var("DRIFTWM_CONFIG", &path) };
     }
 
-    // Parse --backend arg (default: udev on bare metal, winit if nested)
+    // --backend: default udev on bare metal, winit if nested.
     let backend_name = std::env::args()
         .skip_while(|a| a != "--backend")
         .nth(1)
@@ -58,27 +55,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
 
-    // Create calloop event loop
     let mut event_loop: smithay::reexports::calloop::EventLoop<DriftWm> =
         smithay::reexports::calloop::EventLoop::try_new()?;
 
-    // Receive blocked signals via signalfd; the handler calls
-    // loop_signal.stop() — same path as the Quit keybind, so `pkill driftwm`
-    // (or systemd's SIGTERM on shutdown) goes through the clean exit path.
+    // signalfd path so SIGTERM from systemd / `pkill driftwm` goes through
+    // the same clean exit as the Quit keybind.
     signals::listen(&event_loop.handle());
 
-    // Create Wayland display
     let display =
         smithay::reexports::wayland_server::Display::<DriftWm>::new()?;
 
-    // Build compositor state
     let mut data = DriftWm::new(
         display.handle(),
         event_loop.handle(),
         event_loop.get_signal(),
     );
 
-    // Initialize backend BEFORE setting WAYLAND_DISPLAY.
+    // Backend init runs BEFORE setting WAYLAND_DISPLAY.
     match backend_name.as_str() {
         "udev" => {
             let dev = backend::udev::init_udev(&mut event_loop, &mut data)?;
@@ -87,20 +80,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => backend::winit::init_winit(&mut event_loop, &mut data)?,
     }
 
-    // Register the Wayland Display as a calloop source so client messages
-    // are dispatched automatically. This replaces the old poll_fd approach.
+    // Register Wayland Display as a calloop source for auto client dispatch.
     let display_source = smithay::reexports::calloop::generic::Generic::new(
         display,
         smithay::reexports::calloop::Interest::READ,
         smithay::reexports::calloop::Mode::Level,
     );
     event_loop.handle().insert_source(display_source, |_, display, data: &mut DriftWm| {
-        // SAFETY: we never drop the Display while the Generic source is alive
+        // SAFETY: Display is never dropped while the Generic source is alive.
         unsafe { display.get_mut() }.dispatch_clients(data).ok();
         Ok(smithay::reexports::calloop::PostAction::Continue)
     })?;
 
-    // Now create listening socket and advertise it to child processes
     let listening_socket =
         smithay::wayland::socket::ListeningSocketSource::new_auto()?;
     let socket_name = listening_socket
@@ -108,18 +99,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .to_string_lossy()
         .into_owned();
     tracing::info!("Listening on WAYLAND_DISPLAY={socket_name}");
-    // Standard Wayland session env vars for child processes
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &socket_name) };
     unsafe { std::env::set_var("XDG_SESSION_TYPE", "wayland") };
     unsafe { std::env::set_var("XDG_CURRENT_DESKTOP", "driftwm") };
-    // Toolkit env vars (MOZ_ENABLE_WAYLAND, QT_QPA_PLATFORM, etc.) are now
-    // set in Config::load() with user [env] overrides taking precedence.
+    // Toolkit env vars (MOZ_ENABLE_WAYLAND, QT_QPA_PLATFORM, ...) live in
+    // Config::load() with user [env] overrides taking precedence.
     unsafe { std::env::set_var("XDG_SESSION_CLASS", "user") };
     unsafe { std::env::set_var("XDG_SESSION_DESKTOP", "driftwm") };
 
-    // Export only session-level vars to systemd and D-Bus. Pass them through
-    // Command::env() rather than relying on process env — the policy is "don't
-    // touch process env at runtime", so the shell-out gets only what we hand it.
+    // Export session-level vars to systemd and D-Bus via Command::env() —
+    // policy is "don't touch process env at runtime", so the shell-out
+    // gets only what we hand it.
     {
         let session_vars = [
             ("WAYLAND_DISPLAY", socket_name.as_str()),
@@ -151,10 +141,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Notify systemd of readiness so units gated by Before=graphical-session.target
-    // (e.g. foot-server.socket via ConditionEnvironment=WAYLAND_DISPLAY) only get
-    // their conditions evaluated once WAYLAND_DISPLAY is in the user env. Pass
-    // unset_env=true so children spawned later don't inherit NOTIFY_SOCKET.
+    // READY=1 lets graphical-session.target units (e.g. foot-server.socket
+    // gated on ConditionEnvironment=WAYLAND_DISPLAY) evaluate post-export.
+    // unset_env=true so children don't inherit NOTIFY_SOCKET.
     if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
         tracing::warn!("Failed to send READY=1 to systemd: {e}");
     }
@@ -171,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })?;
 
-    // Config file watcher: poll mtime every 500ms
+    // Config watcher: poll mtime every 500ms.
     {
         let config_path = driftwm::config::config_path();
         data.config_file_mtime = std::fs::metadata(&config_path)
@@ -186,7 +175,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(|m| m.modified())
                 .ok();
             if current_mtime != data.config_file_mtime && current_mtime.is_some() {
-                // Debounce: skip if mtime is <100ms old (editor may still be writing)
+                // Debounce: skip if <100ms old (editor may still be writing).
                 let dominated_by_recent_write = current_mtime.is_some_and(|mt| {
                     mt.elapsed().is_ok_and(|age| age.as_millis() < 100)
                 });
@@ -201,16 +190,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })?;
     }
 
-    // Spawn xwayland-satellite on demand (after WAYLAND_DISPLAY is set so
-    // it can connect as a regular Wayland client).
+    // After WAYLAND_DISPLAY is set so satellite can connect as a Wayland client.
     xwayland::setup(&mut data);
 
-    // Auto-reap child processes — prevents zombies from exec/autostart commands.
-    // Must be after backend init: libseat uses waitpid() during session setup.
+    // Auto-reap children. Must run after backend init — libseat uses
+    // waitpid() during session setup.
     unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
 
-    // Defer autostart until the event loop is running — GTK apps (swaync) need
-    // the compositor processing Wayland events before they connect.
+    // Defer autostart so the event loop is running first — GTK apps (swaync)
+    // need Wayland event processing before they connect.
     let autostart = data.autostart.clone();
     if !autostart.is_empty() {
         event_loop.handle().insert_source(
@@ -227,7 +215,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
 
-    // Run the event loop
     tracing::info!("Starting event loop — launch apps with: WAYLAND_DISPLAY={socket_name} <app>");
     event_loop.run(None, &mut data, |data| {
         backend::udev::render_if_needed(data);

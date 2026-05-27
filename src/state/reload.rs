@@ -6,7 +6,6 @@ use smithay::input::keyboard::XkbConfig;
 use super::{DriftWm, output_state};
 
 impl DriftWm {
-    /// Hot-reload config from disk. On parse failure, logs an error and keeps the old config.
     pub fn reload_config(&mut self) {
         let config_path = driftwm::config::config_path();
         let contents = match std::fs::read_to_string(&config_path) {
@@ -27,7 +26,6 @@ impl DriftWm {
             }
         };
 
-        // Hot-reload keyboard layout
         if new_config.keyboard_layout != self.config.keyboard_layout {
             let kb = &new_config.keyboard_layout;
             let xkb = XkbConfig {
@@ -59,7 +57,6 @@ impl DriftWm {
             tracing::info!("Config reload: autostart changes only apply at startup");
         }
 
-        // Keyboard repeat rate/delay
         if new_config.repeat_rate != self.config.repeat_rate
             || new_config.repeat_delay != self.config.repeat_delay
         {
@@ -67,19 +64,16 @@ impl DriftWm {
             keyboard.change_repeat_info(new_config.repeat_rate, new_config.repeat_delay);
         }
 
-        // Momentum friction — apply to all outputs
         if new_config.friction != self.config.friction {
             for output in self.space.outputs() {
                 output_state(output).momentum.friction = new_config.friction;
             }
         }
 
-        // Background source — always clear cached state so that editing
-        // the shader file on disk takes effect after `touch`ing the config,
-        // and switching `type` between shader/tile/wallpaper swaps modes cleanly.
-        // Reset `background_is_animated`: stale `true` (left over from a
-        // previous animated shader) defeats wallpaper/tile damage savings by
-        // forcing per-frame redraws.
+        // Always clear background cache so shader-file edits take effect
+        // after `touch`ing config, and type swaps (shader/tile/wallpaper)
+        // are clean. Reset `background_is_animated` so a stale `true` from
+        // a prior animated shader can't force per-frame redraws.
         self.render.background_shader = None;
         self.render.background_is_animated = false;
         self.render.cached_bg_elements.clear();
@@ -88,18 +82,14 @@ impl DriftWm {
         self.render.wallpaper_shader = None;
         self.render.cached_wallpaper_bg.clear();
 
-        // Per-window border + shadow elements bake `corner_radius` and the
-        // border color into uniforms refreshed only when the phys-key changes
-        // — neither key carries color or corner radius. Drop both caches so a
-        // user edit to `decorations.border_color*` or `decorations.corner_radius`
-        // is picked up on the next frame.
+        // Border + shadow caches key on phys-only — color and corner_radius
+        // live in uniforms. Drop both so edits to those config fields apply.
         self.render.border_cache.clear();
         self.render.shadow_cache.clear();
 
-        // Cursor theme/size — validate theme before committing. Env vars stay
-        // out of process env: child_env (rebuilt by `Config::from_raw`) carries
-        // XCURSOR_* to spawned children, and the cursor loader reads from
-        // `self.config` directly.
+        // Validate cursor theme before committing. XCURSOR_* reaches
+        // children via child_env (rebuilt by `Config::from_raw`); cursor
+        // loader reads `self.config` directly.
         let theme_changed = new_config.cursor_theme != self.config.cursor_theme;
         let size_changed = new_config.cursor_size != self.config.cursor_size;
         if theme_changed || size_changed {
@@ -135,7 +125,6 @@ impl DriftWm {
             }
         }
 
-        // Trackpad settings — reconfigure all connected devices
         if new_config.trackpad != self.config.trackpad {
             self.config.trackpad = new_config.trackpad.clone();
             let devices = self.input_devices.clone();
@@ -145,19 +134,16 @@ impl DriftWm {
             tracing::info!("Config reload: trackpad settings applied to all devices");
         }
 
-        // Env vars: child_env is rebuilt by `Config::from_raw`, so spawned
-        // children pick up new values automatically. Process env stays
-        // untouched. DISPLAY (set by xwayland::setup at startup) is kept by
-        // copying it forward when a satellite is running.
+        // child_env auto-rebuilds via `Config::from_raw`; process env
+        // untouched. Forward DISPLAY (set by xwayland::setup at startup).
         if let Some(display) = self.config.child_env.get("DISPLAY").cloned() {
             new_config.child_env.insert("DISPLAY".into(), display);
         }
 
         self.config = new_config;
 
-        // Force every SSD title bar to re-render with the new decoration config
-        // (font, height, colors). `update()` only rebuilds the buffer when its
-        // cached width/focus/scale differ, so invalidate the cached width.
+        // Invalidate every SSD title bar's cached width so `update()`
+        // rebuilds with the new font/height/colors.
         for deco in self.decorations.values_mut() {
             deco.width = -1;
         }
@@ -169,21 +155,18 @@ impl DriftWm {
         tracing::info!("Config reloaded");
     }
 
-    /// Re-apply per-output rules (mode, scale, transform, position) to existing
-    /// outputs. Mode changes go through `pending_mode_changes` and are picked
-    /// up by the udev backend's render loop; everything else applies in-place
-    /// via `Output::change_current_state`. Uses the same lookup path as
-    /// `create_surface` (`Config::output_config`) so reload and startup compute
-    /// state identically.
+    /// Re-apply per-output rules (mode/scale/transform/position). Mode
+    /// changes go through `pending_mode_changes`; everything else applies
+    /// in-place via `Output::change_current_state`. Same lookup as
+    /// `create_surface` so reload and startup compute identically.
     fn apply_output_rules_after_reload(&mut self) {
         use driftwm::config::{OutputMode as ConfigOutputMode, OutputPosition};
         use smithay::utils::Transform;
 
         let outputs: Vec<smithay::output::Output> = self.space.outputs().cloned().collect();
-        // Track cumulative width for auto-positioning, mirroring `create_surface`'s
-        // algorithm in udev.rs. Outputs processed earlier in iteration order get
-        // smaller x; widths are read post-change_current_state so a scale-change
-        // affects subsequent outputs' auto positions correctly.
+        // Cumulative width for auto-positioning, mirroring `create_surface`.
+        // Widths read post-change_current_state so a scale change affects
+        // subsequent outputs' auto positions.
         let mut auto_x: i32 = 0;
         for output in outputs {
             let name = output.name();
@@ -211,9 +194,9 @@ impl DriftWm {
                         })
                     }
                     ConfigOutputMode::Preferred => {
-                        // We don't currently re-modeset when a rule reverts
-                        // to "preferred" — log so the user understands why
-                        // their old custom mode is still active.
+                        // We don't currently re-modeset when reverting to
+                        // "preferred" — log so users know why their old
+                        // custom mode is still active.
                         tracing::info!(
                             "Config reload: output '{name}' rule is 'preferred', \
                              but reverting from a custom mode isn't supported live — \
@@ -234,7 +217,7 @@ impl DriftWm {
                 }
             }
 
-            // Scale: missing field = revert to 1.0 (default).
+            // Missing field reverts to 1.0.
             let want_scale = cfg.and_then(|c| c.scale).unwrap_or(1.0);
             let cur_scale = output.current_scale().fractional_scale();
             let new_scale = if (cur_scale - want_scale).abs() > f64::EPSILON {
@@ -243,7 +226,7 @@ impl DriftWm {
                 None
             };
 
-            // Transform: missing field = revert to Normal.
+            // Missing field reverts to Normal.
             let want_transform = cfg.and_then(|c| c.transform).unwrap_or(Transform::Normal);
             let new_transform = if output.current_transform() != want_transform {
                 Some(want_transform)
@@ -251,8 +234,7 @@ impl DriftWm {
                 None
             };
 
-            // Position: missing field (or `Auto`) = auto-place by accumulated
-            // width, mirroring `create_surface` in udev.rs.
+            // Missing/`Auto` = auto-place by accumulated width.
             let want_position: smithay::utils::Point<i32, smithay::utils::Logical> =
                 match cfg.map(|c| &c.position) {
                     Some(OutputPosition::Fixed(x, y)) => (*x, *y).into(),
@@ -279,8 +261,7 @@ impl DriftWm {
                 self.output_config_dirty = true;
             }
 
-            // Advance auto_x using the output's *post-change* logical width so
-            // a scale change on one output affects the next output's auto x.
+            // Use *post-change* width so a scale change cascades to next.
             auto_x += crate::state::output_logical_size(&output).w;
         }
     }

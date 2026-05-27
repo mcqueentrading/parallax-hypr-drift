@@ -1,30 +1,25 @@
 //! Smart placement of a new window adjacent to a focused window's cluster.
 //!
-//! Algorithm: BFS the focused window's snap-cluster (preferring closer
-//! members). For each member try a *full-fit* placement (new window's
-//! parallel range stays inside the member's), then a *partial-fit*
-//! placement (new window may overhang past the member's edge into free
-//! space). First valid candidate wins.
+//! Algorithm: BFS the snap-cluster (closer members first). For each member
+//! try *full-fit* (new range ⊆ member's parallel range) then *partial-fit*
+//! (overhang into free space). First valid candidate wins.
 //!
-//! The two-tier collapse: L1 ("clean edge, no other window touches it")
-//! and L2 ("some blocker, but full snap fits inside the gap") share the
-//! same placement formula `clamp(M.center, feasible_range)` — a wide
-//! feasible range gives the L1 result (centered on M); a narrow one
-//! sticks to the closer end. L3 ("overhang into free space outside M")
-//! is the partial-fit pass.
+//! The two-tier collapse: L1 ("clean edge") and L2 ("blocker but full snap
+//! fits in the gap") share `clamp(M.center, feasible_range)` — wide range
+//! gives L1 (centered on M), narrow sticks to the closer end. L3 ("overhang
+//! into free space outside M") is the partial-fit pass.
 //!
-//! Every member's edge ordering is re-evaluated for that member: an
-//! edge near the viewport for the focused window may not be the same
-//! direction as for a neighbor several columns away.
+//! Edge ordering is per-member: the viewport-near edge for the focused
+//! window may not be the same direction for a neighbor several columns away.
 
 use std::collections::{HashSet, VecDeque};
 
 use crate::layout::cluster::adjacent_side;
 use crate::layout::snap::SnapRect;
 
-/// Below this `|vc - m.center|` threshold, the viewport gives no clear
-/// directional bias — treat it as "centered on M". Above the threshold,
-/// the user has deliberately panned and that direction wins over heuristics.
+/// Below this `|vc - m.center|`, viewport gives no clear directional bias
+/// (treat as centered on M). Above, the user has deliberately panned and
+/// that direction wins over heuristics.
 const VIEWPORT_DEADZONE: f64 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,24 +63,19 @@ enum Edge {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FitMode {
-    /// New window's parallel range ⊆ member's parallel range. No overhang.
+    /// New range ⊆ member's parallel range; no overhang.
     Full,
-    /// New window overlaps member's parallel range with positive overlap
-    /// but extends past it into free space. Overhang.
+    /// Positive overlap with member, but new range extends past into free space.
     Partial,
 }
 
-/// Place a new rect of size `(new_w, new_h)` adjacent to the focused window's
-/// cluster. Returns the new rect's top-left (frame coords), or `None` if no
-/// placement was found.
+/// Place `(new_w, new_h)` adjacent to the focused window's cluster.
+/// Returns new rect's top-left (frame coords), or `None` if no fit.
 ///
-/// `windows` lists every existing window's frame rect. `focused_idx` indexes
-/// into `windows`. `cluster_eligible` is the subset of indices that may serve
-/// as anchors (typically excludes widgets and fullscreen windows). Windows
-/// outside `cluster_eligible` still act as obstacles.
-///
-/// `viewport_center` is canvas-space coords used to pick the preferred edge
-/// order per anchor. `gap` is the snap gap (matches the cluster definition).
+/// `windows` is every window's frame rect; `cluster_eligible` is the
+/// indices that may serve as anchors (excludes widgets/fullscreen).
+/// Ineligible windows still act as obstacles. `viewport_center` is
+/// canvas-space; `gap` matches the cluster definition.
 pub fn place_auto(
     windows: &[Rect],
     focused_idx: usize,
@@ -99,17 +89,15 @@ pub fn place_auto(
         return None;
     }
     let order = bfs_cluster(windows, focused_idx, cluster_eligible, gap);
-    // Bbox of the focused window's connected cluster only (NOT every
-    // eligible window) — distant unrelated clusters shouldn't bias
-    // the growth direction of this one.
+    // Bbox of THIS cluster only — distant unrelated clusters shouldn't
+    // bias growth direction.
     let cluster_set: HashSet<usize> = order.iter().copied().collect();
     let focused_cluster_bbox = cluster_bbox(windows, &cluster_set);
 
-    // Note: each anchor M exhausts both Full and Partial modes before
-    // BFS moves to the next cluster member. A *focused-window partial-fit
-    // with overhang* therefore wins over a *neighbor's clean full-fit* —
-    // intentional: anchor proximity beats fit cleanliness so the new
-    // window stays close to where the user is working.
+    // Each anchor exhausts Full + Partial before BFS moves on. So a
+    // focused-window Partial beats a neighbor's clean Full — anchor
+    // proximity beats fit cleanliness so the new window stays close to
+    // where the user is working.
     for m_idx in order {
         let m = windows[m_idx];
         let edges = edge_order_for(
@@ -125,11 +113,10 @@ pub fn place_auto(
             && (viewport_center.1 - m.cy()).abs() < VIEWPORT_DEADZONE;
 
         if in_deadzone {
-            // No viewport direction signal — pick by fit quality first
-            // (Full before Partial), then by compact-cluster attachment
-            // count, then by edge iteration order. Pulls a 4th window
-            // into the empty corner of an L-shaped 3-cluster (forming a
-            // 2x2) instead of extending a line.
+            // No direction signal — fit quality first (Full > Partial),
+            // then compact-cluster attachment count, then edge order.
+            // Pulls a 4th window into an L-cluster's corner (forming 2x2)
+            // instead of extending a line.
             for mode in [FitMode::Full, FitMode::Partial] {
                 let mut best: Option<(usize, (f64, f64))> = None;
                 for &edge in &edges {
@@ -146,11 +133,10 @@ pub fn place_auto(
                 }
             }
         } else {
-            // Deliberate viewport pan: direction beats fit cleanliness.
-            // For each edge in viewport order, try Full first then fall
-            // through to Partial on the SAME edge before moving to the
-            // next edge. A Partial-fit on the requested edge beats a
-            // Full-fit on a wrong-direction edge.
+            // Deliberate pan: direction beats fit cleanliness. For each
+            // edge, try Full then Partial on the SAME edge before moving
+            // on — Partial on the requested edge beats Full on a wrong
+            // edge.
             for edge in edges {
                 for mode in [FitMode::Full, FitMode::Partial] {
                     if let Some(pos) = try_place(&m, windows, m_idx, new_w, new_h, edge, mode, gap) {
@@ -163,10 +149,9 @@ pub fn place_auto(
     None
 }
 
-/// Count snap-attachments from `candidate` to existing cluster members
-/// (excluding the current anchor `m_idx`, which is always adjacent by
-/// construction). Used by the compact-cluster scorer to prefer placements
-/// that touch multiple existing windows.
+/// Snap-attachments from `candidate` to existing cluster members,
+/// excluding `m_idx` (always adjacent by construction). The compact-cluster
+/// scorer uses this to prefer placements touching multiple windows.
 fn count_attachments(
     candidate: &Rect,
     windows: &[Rect],
@@ -184,22 +169,12 @@ fn count_attachments(
 }
 
 /// Edge order with 2D-growth heuristic: prefer edges on the free axis.
+/// If `m` already has a neighbor on one axis, prefer the perpendicular
+/// axis so the cluster grows 2D rather than continuing the line. Falls
+/// back to viewport order when both axes (or neither) are occupied.
 ///
-/// If `m` already has a snapped cluster-neighbor on (say) the X axis, it
-/// already extends horizontally; preferring Y-axis edges (Top/Bottom) for
-/// the next placement makes the cluster grow 2D rather than continuing the
-/// line. When both axes are occupied (M is in a cluster middle) or neither
-/// (M is alone), falls back to pure viewport-direction order.
-///
-/// The heuristic only fires when `vc` is inside the viewport deadzone
-/// (i.e., no clear viewport bias). A deliberate pan past the deadzone
-/// always wins over the heuristic — the user explicitly steered toward
-/// that edge.
-///
-/// Within each axis preference, the ordering inside the axis (which of
-/// Left/Right or which of Top/Bottom comes first) is inherited from
-/// `edge_order`, so the deadzone-default still steers the first-spawn
-/// case.
+/// Only fires inside the viewport deadzone — deliberate pan always wins.
+/// Within an axis, ordering is inherited from `edge_order`.
 fn edge_order_for(
     m: &Rect,
     vc: (f64, f64),
@@ -219,10 +194,8 @@ fn edge_order_for(
     let m_snap = m.to_snap();
     let mut x_occupied = false;
     let mut y_occupied = false;
-    // Snap-adjacency only holds within one connected component, so
-    // iterating `eligible` (any cluster) is equivalent to iterating
-    // M's own cluster — `adjacent_side` returns Some only for windows
-    // that ARE in M's cluster.
+    // Iterating any `eligible` window is equivalent to iterating M's
+    // cluster: `adjacent_side` returns Some only for cluster members.
     for (i, w) in windows.iter().enumerate() {
         if i == m_idx || !eligible.contains(&i) {
             continue;
@@ -234,18 +207,14 @@ fn edge_order_for(
         }
     }
 
-    // 1. Axis-occupation: M has a neighbor on exactly one axis → grow on
-    //    the perpendicular axis (M can't grow on the occupied side anyway).
+    // Axis-occupation: M occupied on exactly one axis → grow perpendicular.
     if x_occupied != y_occupied {
         return reshuffle(&base, /* prefer_y = */ x_occupied);
     }
 
-    // 2. Cluster-bbox-aspect: when M's local situation gives no signal
-    //    (alone, or surrounded on both axes), look at the focused
-    //    window's cluster. A wider-than-tall cluster prefers vertical
-    //    growth and vice versa, pulling the cluster toward a square.
-    //    Without this rule, a finished NxN square keeps appending N-tall
-    //    columns to its right.
+    // Cluster-bbox-aspect: M alone or both-axes occupied. Wider-than-tall
+    // cluster prefers vertical growth and vice versa, pulling toward a
+    // square. Without this rule, a finished NxN keeps appending columns.
     const BBOX_EPS: f64 = 1.0;
     if let Some((bw, bh)) = focused_cluster_bbox {
         if bw > bh + BBOX_EPS {
@@ -284,8 +253,7 @@ fn reshuffle(base: &[Edge; 4], prefer_y: bool) -> [Edge; 4] {
     out
 }
 
-/// Combined width and height of the bounding box of all eligible cluster
-/// windows. `None` if `eligible` is empty.
+/// (width, height) of the eligible cluster's bounding box. `None` if empty.
 fn cluster_bbox(windows: &[Rect], eligible: &HashSet<usize>) -> Option<(f64, f64)> {
     let mut x_low = f64::INFINITY;
     let mut x_high = f64::NEG_INFINITY;
@@ -309,9 +277,8 @@ fn cluster_bbox(windows: &[Rect], eligible: &HashSet<usize>) -> Option<(f64, f64
     }
 }
 
-/// BFS the snap-adjacency graph restricted to `eligible` indices, starting
-/// at `start`. Within each BFS layer, neighbors are visited in order of
-/// canvas distance to the *start* (focused) window's center — closer first.
+/// BFS the snap-adjacency graph restricted to `eligible`. Within each
+/// layer, neighbors visit in order of canvas distance to `start` — closer first.
 fn bfs_cluster(
     windows: &[Rect],
     start: usize,
@@ -347,10 +314,9 @@ fn bfs_cluster(
     order
 }
 
-/// Edge order for placement search around `m`: primary edge (the one facing
-/// the viewport center) first, then clockwise. Inside the viewport deadzone
-/// returns a fixed default order; the compact-cluster scorer in `place_auto`
-/// is what actually picks the direction in that case.
+/// Edge order around `m`: viewport-facing edge first, then clockwise.
+/// Inside the deadzone returns a default order; `place_auto`'s scorer
+/// picks the actual direction in that case.
 fn edge_order(m: &Rect, vc: (f64, f64)) -> [Edge; 4] {
     let dx = vc.0 - m.cx();
     let dy = vc.1 - m.cy();
@@ -376,21 +342,14 @@ fn rotate_cw(e: Edge) -> [Edge; 4] {
     }
 }
 
-/// Attempt to place a new rect against `m`'s `edge`. Returns the new rect's
-/// top-left position, or `None` if no valid placement exists at this
-/// (member, edge, mode).
+/// Place a new rect against `m`'s `edge`. Returns top-left or `None`.
 ///
-/// Uses parallel/perpendicular axis projection: for Right/Left edges
-/// parallel = y, perpendicular = x; for Top/Bottom parallel = x,
-/// perpendicular = y. Forbidden parallel intervals are computed from any
-/// other window whose perpendicular extent (with gap padding) overlaps the
-/// new rect's perpendicular extent. Free intervals are the complement.
-///
-/// Within each free interval the candidate is `clamp(M.par_center,
-/// feasible_range)` — the new rect's parallel center sits as close to M's
-/// center as possible. Full-fit constrains the feasible range to inside
-/// M's parallel range; partial-fit relaxes that, keeping only the
-/// "positive overlap with M" requirement.
+/// Parallel/perpendicular projection: Right/Left → par=y, perp=x;
+/// Top/Bottom → par=x, perp=y. Forbidden intervals come from other windows
+/// whose perp extent (gap-padded) overlaps the new rect's perp extent.
+/// Within each free interval, the candidate is `clamp(M.par_center,
+/// feasible_range)`. Full constrains feasible to inside M's parallel range;
+/// Partial only requires positive overlap with M.
 #[allow(clippy::too_many_arguments)]
 fn try_place(
     m: &Rect,
@@ -440,10 +399,9 @@ fn try_place(
 
     let mut best: Option<(f64, f64)> = None;
     for (a, b) in free {
-        // Full-fit feasible range — par_lo such that the new range fits
-        // inside both the free interval [a, b] AND M's parallel range.
-        // Boundaries of `b` are valid because forbidden intervals are open
-        // (snap-distance with the next blocker is allowed).
+        // Full-fit feasible: par_lo s.t. new range ⊆ [a,b] AND M's parallel
+        // range. `b` is inclusive — forbidden intervals are open, snap
+        // contact with the next blocker is allowed.
         let full_lo = a.max(m_par_lo);
         let full_hi = b.min(m_par_hi - new_par_len);
         let full_feasible = full_hi >= full_lo;
@@ -457,11 +415,9 @@ fn try_place(
             }
             FitMode::Partial => {
                 if full_feasible {
-                    // Full pass already returned this candidate.
-                    continue;
+                    continue; // Full pass would have returned this.
                 }
-                // Constraints: par_lo ∈ [a, b] AND positive overlap with M
-                // (par_lo > m_par_lo - new_par_len AND par_lo < m_par_hi).
+                // par_lo ∈ [a, b] AND positive overlap with M.
                 let lo = a.max(m_par_lo - new_par_len + 1e-9);
                 let hi = b.min(m_par_hi - 1e-9);
                 if hi < lo {
@@ -486,9 +442,8 @@ fn try_place(
     Some(pos)
 }
 
-/// Complement of `forbidden` on the real line. Treats overlapping intervals
-/// as merged. Returns intervals in increasing order, possibly unbounded on
-/// either end.
+/// Complement of `forbidden` on the real line; overlapping inputs merge.
+/// Result is in increasing order, possibly unbounded on either end.
 fn compute_free_intervals(forbidden: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut sorted: Vec<(f64, f64)> = forbidden
         .iter()

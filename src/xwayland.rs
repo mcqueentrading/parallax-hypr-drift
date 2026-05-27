@@ -25,17 +25,15 @@ use crate::state::DriftWm;
 const MAX_DISPLAY: u32 = 50;
 
 pub struct Satellite {
-    /// The child satellite process. Held for its lifetime; on driftwm
-    /// shutdown the handle is dropped and satellite exits when its Wayland
-    /// connection to us closes. SIGCHLD is SIG_IGN in driftwm so the kernel
-    /// auto-reaps.
+    /// Held for the satellite's lifetime; satellite exits when its Wayland
+    /// connection closes on drop. SIGCHLD is SIG_IGN so the kernel auto-reaps.
     #[allow(dead_code)]
     child: Child,
 }
 
-/// Spawn `xwayland-satellite :N` eagerly, export `DISPLAY=:N`. Fails soft on
-/// any error: logs a warning and leaves `state.satellite` as `None`, meaning
-/// X11 apps just won't work but the compositor runs.
+/// Spawn `xwayland-satellite :N` eagerly, export `DISPLAY=:N`. Fails soft:
+/// any error leaves `state.satellite = None` so X11 apps don't work but
+/// the compositor runs.
 pub fn setup(state: &mut DriftWm) {
     if state.satellite.is_some() {
         return;
@@ -67,9 +65,7 @@ pub fn setup(state: &mut DriftWm) {
         .env_remove("RUST_LIB_BACKTRACE")
         .stdin(Stdio::null())
         .stdout(Stdio::null());
-    // stderr inherits so satellite's startup messages and any errors surface
-    // alongside driftwm's log. Most noise is xkbcomp warnings; if those are
-    // too distracting, redirect driftwm's stderr to a file.
+    // stderr inherits so satellite startup messages surface alongside our log.
 
     unsafe {
         process.pre_exec(|| {
@@ -95,8 +91,7 @@ pub fn setup(state: &mut DriftWm) {
         child.id()
     );
 
-    // Make DISPLAY visible to child processes. Process env stays untouched —
-    // we add it to child_env so subsequent `spawn_command` calls inherit it.
+    // Make DISPLAY visible to children via child_env (process env untouched).
     state
         .config
         .child_env
@@ -147,12 +142,10 @@ fn probe_satellite(path: &str) -> bool {
     }
 }
 
-/// Find a display number whose lock file *and* unix socket are both absent.
-/// Satellite's internal Xwayland will create the lock and bind
-/// `/tmp/.X11-unix/X{N}`, so either artifact already existing means another
-/// X server (e.g. an SDDM-managed Xorg greeter on the same seat) holds the
-/// number. Stat errors other than ENOENT are treated as "occupied" — a
-/// root-owned lock file with no read permission would otherwise look free.
+/// Display number with both lock file AND unix socket absent — either
+/// artifact present means another X server (SDDM Xorg greeter, etc.) holds
+/// it. Non-ENOENT stat errors count as occupied (so a root-owned lock file
+/// with no read permission doesn't look free).
 fn find_free_display() -> Option<u32> {
     (0..MAX_DISPLAY).find(|&n| !display_in_use(n))
 }

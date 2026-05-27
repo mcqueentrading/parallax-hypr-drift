@@ -48,8 +48,8 @@ use smithay::wayland::shell::wlr_layer::Layer as WlrLayer;
 use driftwm::canvas;
 use driftwm::window_ext::WindowExt;
 
-/// Build render elements for a locked session: only the lock surface.
-/// No compositor cursor — the lock client manages its own visuals.
+/// Render elements for a locked session: only the lock surface (the lock
+/// client provides its own cursor).
 fn compose_lock_frame(
     state: &crate::state::DriftWm,
     renderer: &mut GlesRenderer,
@@ -126,7 +126,6 @@ fn push_corner_clipped_elements(
     }
 }
 
-/// Push window surface elements as plain (no corner clip) zoomed Window elements.
 fn push_plain_elements(
     target: &mut Vec<OutputRenderElements>,
     elems: Vec<WaylandSurfaceRenderElement<GlesRenderer>>,
@@ -141,25 +140,22 @@ fn push_plain_elements(
     }));
 }
 
-/// Assemble all render elements for a frame.
-/// Caller provides cursor elements (built before taking the renderer).
+/// Assemble all render elements for a frame. Caller provides cursor elements
+/// (built before taking the renderer).
 pub fn compose_frame(
     state: &mut crate::state::DriftWm,
     renderer: &mut GlesRenderer,
     output: &Output,
     cursor_elements: Vec<OutputRenderElements>,
 ) -> Vec<OutputRenderElements> {
-    // Clean up dead DnD icon (source destroyed / Esc cancelled)
     if state.dnd_icon.as_ref().is_some_and(|i| !i.surface.alive()) {
         state.dnd_icon = None;
     }
 
-    // Session lock: render only lock surface (or black) + cursor
     if !matches!(state.session_lock, crate::state::SessionLock::Unlocked) {
         return compose_lock_frame(state, renderer, output, cursor_elements);
     }
 
-    // Ensure this output has a background element (lazy init per output, and re-init after config reload)
     let name = output.name();
     if !state.render.cached_bg_elements.contains_key(&name)
         && !state.render.cached_tile_bg.contains_key(&name)
@@ -169,7 +165,8 @@ pub fn compose_frame(
         init_background(state, renderer, output_size, &name);
     }
 
-    // Read per-output state directly — not via active_output() which follows the pointer
+    // Read per-output state directly — active_output() follows the pointer,
+    // which is wrong when rendering an output the pointer isn't on.
     let (camera, zoom) = {
         let os = crate::state::output_state(output);
         (os.camera, os.zoom)
@@ -184,15 +181,14 @@ pub fn compose_frame(
     let output_scale = output.current_scale().fractional_scale();
     let scale = Scale::from(output_scale);
 
-    // Split windows into normal and widget layers so canvas layers render between them.
-    // Replicates render_elements_for_region internals: bbox overlap, camera offset, zoom.
+    // Split windows into normal and widget layers so canvas layers render
+    // between them. Replicates render_elements_for_region internals.
     let mut zoomed_normal: Vec<OutputRenderElements> = Vec::new();
     let mut zoomed_widgets: Vec<OutputRenderElements> = Vec::new();
 
     let blur_enabled = state.render.blur_down_shader.is_some() && state.render.blur_up_shader.is_some() && state.render.blur_mask_shader.is_some();
     let mut blur_requests: Vec<BlurRequestData> = Vec::new();
 
-    // Focused surface for decoration focus state
     let focused_surface = state
         .seat
         .get_keyboard()
@@ -310,14 +306,13 @@ pub fn compose_frame(
         let elem_start = target.len();
         let mut shadow_count = 0usize;
 
-        // Popups push FIRST (earlier-in-vec = on-top in smithay z-order),
-        // so they sit above the title bar and the clipped window content.
+        // Popups push first (earlier in vec = on-top in smithay z-order) so
+        // they sit above the title bar and clipped window content.
         push_plain_elements(target, popup_elems, zoom);
 
         if has_ssd {
             let bar_height = state.config.decorations.title_bar_height;
 
-            // Update decoration state (re-render title bar if needed).
             // Title falls back to app_id, then blank.
             let deco_title = window
                 .window_title()
@@ -333,7 +328,6 @@ pub fn compose_frame(
                 );
             }
 
-            // Title bar element: positioned above the window
             if let Some(deco) = state.decorations.get(&wl_surface.id()) {
                 let bar_loc: Point<f64, Logical> = Point::from((
                     render_loc.x,
@@ -360,8 +354,7 @@ pub fn compose_frame(
                 }
             }
 
-            // Window surface elements — only the bottom corners round
-            // (the title bar covers the top edge).
+            // Only bottom corners round (title bar covers the top edge).
             if let Some(ref shader) = state.render.corner_clip_shader {
                 let radius = effective_corner_radius as f32;
                 if radius > 0.0 {
@@ -384,8 +377,8 @@ pub fn compose_frame(
                 push_plain_elements(target, elems, zoom);
             }
 
-            // Border wraps title bar + content, drawn between window content
-            // and shadow so it sits visually outside the rounded corner mask.
+            // Border wraps title bar + content; drawn between window content
+            // and shadow so it sits outside the rounded corner mask.
             if effective_bw > 0
                 && let Some(shader) = state.render.border_shader.clone()
             {
@@ -410,10 +403,9 @@ pub fn compose_frame(
             }
 
             // Shadow encloses title bar + content + border; cached per-surface
-            // so the damage tracker can skip unchanged regions across frames.
-            // When a border is present, the shadow's footprint and corner
-            // radius both grow by border_width so the shadow grades out from
-            // the border's outer perimeter (same approach as niri).
+            // so the damage tracker can skip unchanged regions. With a border,
+            // footprint and corner radius grow by border_width so the shadow
+            // grades from the border's outer perimeter (matches niri).
             if effective_shadow
                 && let Some(shader) = state.render.shadow_shader.clone()
             {
@@ -488,9 +480,8 @@ pub fn compose_frame(
                     );
                 }
 
-                // Compositor shadow behind CSD windows. Footprint and corner
-                // radius grow by border_width so the shadow grades out from
-                // the border's outer edge instead of the content edge.
+                // Footprint and corner radius grow by border_width so the
+                // shadow grades from the border's outer edge, not the content edge.
                 if effective_shadow
                     && let Some(shader) = state.render.shadow_shader.clone()
                 {
@@ -521,8 +512,7 @@ pub fn compose_frame(
                     shadow_count = 1;
                 }
             } else {
-                // Bare (`decoration = "none"`) or fullscreen: pass the client
-                // surface through with no compositor chrome.
+                // Bare (`decoration = "none"`) or fullscreen: pass through.
                 push_plain_elements(target, elems, zoom);
             }
         } else {
@@ -555,7 +545,7 @@ pub fn compose_frame(
                             - (state.config.decorations.title_bar_height as f64 * zoom) as i32,
                     ))
                 } else {
-                    // CSD windows: geometry starts at render_loc + geo.loc, not at render_loc
+                    // CSD: geometry starts at render_loc + geo.loc.
                     let geo = window.geometry();
                     Point::from((
                         ((render_loc.x + geo.loc.x as f64) * zoom) as i32,
@@ -565,12 +555,11 @@ pub fn compose_frame(
                 screen_size,
             ).to_physical_precise_round(output_scale);
 
-            // Convert client-requested blur region from surface-local Logical to
-            // mask-local Physical (origin at screen_rect.loc). Composite scale =
-            // zoom × output_scale (matches the screen_rect derivation above).
-            // Offset accounts for where the wl_surface (0,0) lands in the mask:
-            //   SSD: (0, TITLE_BAR_HEIGHT) — title bar shifts mask up
-            //   CSD: -geo.loc — screen_rect is anchored at geometry, not surface
+            // Convert client blur region: surface-local Logical → mask-local
+            // Physical at composite_scale = zoom × output_scale.
+            // wl_surface (0,0) offset within mask:
+            //   SSD: (0, TITLE_BAR_HEIGHT) — title bar shifts mask up.
+            //   CSD: -geo.loc — screen_rect anchored at geometry, not surface.
             let region_rects = if client_blur {
                 let rects = client_blur_rects.as_ref().unwrap();
                 let composite_scale = zoom * output_scale;
@@ -599,11 +588,9 @@ pub fn compose_frame(
                 None
             };
 
-            // If all client rects clipped to nothing AND no rule asked for blur,
-            // skip the request entirely. region_rects=None would otherwise be
-            // interpreted as whole-window blur — wrong, because the client
-            // explicitly asked for specific regions (which happen to land outside
-            // the window).
+            // If all client rects clipped to nothing AND no rule asked for
+            // blur, skip — otherwise region_rects=None would be interpreted
+            // as whole-window blur, against what the client requested.
             let rule_blur = applied.as_ref().is_some_and(|r| r.blur);
             let skip_clipped_out = client_blur && region_rects.is_none() && !rule_blur;
 
@@ -667,7 +654,7 @@ pub fn compose_frame(
     let (background_layer_elements, _) =
         build_layer_elements(state, output, renderer, WlrLayer::Background, None);
 
-    // Compute prefix offsets so we know where each group lands in all_elements
+    // Prefix offsets locate each group in all_elements for blur insertion.
     let overlay_prefix = cursor_elements.len();
     let top_prefix = overlay_prefix + overlay_elements.len();
     let normal_prefix = top_prefix + top_elements.len();
@@ -675,7 +662,7 @@ pub fn compose_frame(
         + zoomed_normal.len()
         + canvas_layer_elements.len();
 
-    // Merge blur requests: layer surfaces first (front-to-back), then windows
+    // Layer surfaces first (front-to-back), then windows.
     let mut all_blur_requests: Vec<BlurRequestData> = Vec::new();
     all_blur_requests.extend(overlay_blur);
     all_blur_requests.extend(top_blur);
@@ -704,7 +691,6 @@ pub fn compose_frame(
     all_elements.extend(bg_elements);
     all_elements.extend(background_layer_elements);
 
-    // Process blur requests: render behind-content, blur, insert
     if !all_blur_requests.is_empty() {
         process_blur_requests(
             state, renderer, output, output_scale,
@@ -713,7 +699,6 @@ pub fn compose_frame(
         );
     }
 
-    // Prune stale blur cache entries
     if blur_enabled {
         let active_ids: std::collections::HashSet<_> =
             all_blur_requests.iter().map(|r| r.surface_id.clone()).collect();
@@ -723,7 +708,7 @@ pub fn compose_frame(
     all_elements
 }
 
-/// Draw thin outlines showing where other monitors' viewports sit on the canvas.
+/// Thin outlines showing where other monitors' viewports sit on the canvas.
 fn build_output_outline_elements(
     state: &crate::state::DriftWm,
     renderer: &mut GlesRenderer,
@@ -751,25 +736,22 @@ fn build_output_outline_elements(
         };
         let other_size = crate::state::output_logical_size(other);
 
-        // Other output's visible canvas rect
         let other_canvas = canvas::visible_canvas_rect(
             other_camera.to_i32_round(),
             other_size,
             other_zoom,
         );
 
-        // Transform to screen coords on *this* output
+        // Transform to screen coords on *this* output.
         let screen_x = ((other_canvas.loc.x as f64 - camera.x) * zoom) as i32;
         let screen_y = ((other_canvas.loc.y as f64 - camera.y) * zoom) as i32;
         let screen_w = (other_canvas.size.w as f64 * zoom) as i32;
         let screen_h = (other_canvas.size.h as f64 * zoom) as i32;
 
-        // Clip to viewport
         let vp = Rectangle::from_size(viewport_size);
         let outline_rect = Rectangle::new((screen_x, screen_y).into(), (screen_w, screen_h).into());
         if !vp.overlaps(outline_rect) { continue }
 
-        // Draw 4 edges as thin filled buffers
         let edges: [(i32, i32, i32, i32); 4] = [
             (screen_x, screen_y, screen_w, thickness),                         // top
             (screen_x, screen_y + screen_h - thickness, screen_w, thickness),  // bottom
@@ -778,7 +760,6 @@ fn build_output_outline_elements(
         ];
 
         for (ex, ey, ew, eh) in edges {
-            // Clip edge to viewport
             let x0 = ex.max(0);
             let y0 = ey.max(0);
             let x1 = (ex + ew).min(viewport_size.w);
