@@ -15,7 +15,7 @@ Traditional window managers arrange windows to fit your screen. Stacking composi
 
 Designed with laptops in mind: navigation and window management are trackpad-first; the infinite canvas makes the most of a small screen.
 
-Built on [smithay](https://github.com/Smithay/smithay). Inspired by [vxwm](https://codeberg.org/wh1tepearl/vxwm), [hevel](https://git.sr.ht/~dlm/hevel), and [niri](https://github.com/YaLTeR/niri).
+Built on [smithay](https://github.com/Smithay/smithay). Inspired by [vxwm](https://codeberg.org/wh1tepearl/vxwm); borrows implementation details from [niri](https://github.com/YaLTeR/niri).
 
 **WARNING:** This is experimental software. Primarily built with AI. Use at your own risk.
 
@@ -108,7 +108,7 @@ Three modes (all rendered as shaders internally):
 - **`tile`** — any PNG/JPG, tiled infinitely across the canvas.
 - **`wallpaper`** — single image stretched to fill viewport (does not scroll/zoom) — a classic desktop wallpaper.
 
-GPU cost rises with how often the background redraws: `wallpaper` renders once and stays; static shaders and tiles redraw on pan/zoom but cache when the viewport is still; animated shaders redraw every frame.
+GPU cost scales with what a shader reads: one that reads no viewport uniforms renders once (as cheap as `wallpaper`); reading `u_camera`/`u_zoom` redraws on pan/zoom; reading `u_time` redraws every frame. Tiles redraw on pan/zoom; `wallpaper` renders once.
 
 ```toml
 [background]
