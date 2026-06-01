@@ -37,6 +37,44 @@ const N_LODS: u32 = 8;
 /// sharp target-LOD bakes so a fast pan can't stall a frame. Tuned via Tracy.
 const BAKE_BUDGET: usize = 2;
 
+/// Apron width, in baked texels, added on every side of a chunk. Display-time
+/// bilinear sampling reaches at most one texel past the sampled point, so a
+/// 1-texel apron of true neighbor-continuation pixels is enough to stop edge
+/// clamping — the source of visible inter-chunk seams.
+const APRON_TEXELS: i32 = 1;
+
+/// Padded-bake dimensions for a chunk: `(area_canvas, fbo_texels, apron_canvas)`
+/// — the padded canvas span the shader renders into, the square texture it lands
+/// in, and the per-side border width. `apron_canvas` rounds up so the apron is
+/// always ≥ one full texel even when `scale < 1` at coarse LODs.
+fn apron_dims(chunk_size: i32, bake_px: i32) -> (i32, i32, i32) {
+    let scale = bake_px as f64 / chunk_size as f64;
+    let apron_canvas = ((APRON_TEXELS as f64 / scale).ceil() as i32).max(1);
+    let area_canvas = chunk_size + 2 * apron_canvas;
+    let fbo_texels = ((area_canvas as f64) * scale).round().max(1.0) as i32;
+    (area_canvas, fbo_texels, apron_canvas)
+}
+
+/// Interior crop (the `chunk_size` region) of an apron-padded bake, in buffer
+/// (texel) coords — the sub-rect the displayed chunk actually samples. Returned
+/// as fractional texels so the interior maps to `[origin, origin + chunk_size]`
+/// exactly regardless of `fbo_texels` rounding, and identically for every chunk
+/// at a LOD (so the only residual is a shared sub-texel offset, never a seam).
+fn interior_src(chunk_size: i32, bake_px: i32) -> Rectangle<f64, Buffer> {
+    let (area_canvas, fbo_texels, apron_canvas) = apron_dims(chunk_size, bake_px);
+    let texels_per_canvas = fbo_texels as f64 / area_canvas as f64;
+    Rectangle::new(
+        Point::from((
+            apron_canvas as f64 * texels_per_canvas,
+            apron_canvas as f64 * texels_per_canvas,
+        )),
+        Size::from((
+            chunk_size as f64 * texels_per_canvas,
+            chunk_size as f64 * texels_per_canvas,
+        )),
+    )
+}
+
 pub struct ShaderChunkCache {
     shader: GlesPixelProgram,
     chunk_bg_shader: GlesTexProgram,
@@ -101,22 +139,26 @@ impl ShaderChunkCache {
         self.pending
     }
 
-    /// Bake chunk `(lod, cx, cy)` into a `bake_px²` texture by rendering the
-    /// shader once with `u_camera` = the chunk's canvas origin and the `size`
-    /// uniform = the chunk's canvas span. Goes through the same
-    /// `PixelShaderElement` draw path as the live shader, so baked pixels match
-    /// live output exactly. On GPU failure the chunk is left uncached, so the
-    /// coarse-to-fine resolve falls back to a coarser LOD.
+    /// Bake chunk `(lod, cx, cy)` into a texture by rendering the shader once
+    /// with the `size` uniform = the chunk's (apron-padded, see [`apron_dims`])
+    /// canvas span and `u_camera` = its top-left canvas position. Goes through
+    /// the same `PixelShaderElement` draw path as the live shader, so baked
+    /// pixels match live output exactly. On GPU failure the chunk is left
+    /// uncached, so the coarse-to-fine resolve falls back to a coarser LOD.
     fn bake_chunk(&mut self, renderer: &mut GlesRenderer, lod: u32, cx: i32, cy: i32, frame: u64) {
         let chunk_size = self.chunk_canvas_size_at(lod);
         let origin = chunk_origin(cx, cy, chunk_size);
         let bake_px = self.bake_px;
-        // Bake scale < 1 at coarse LODs: bake_px texels cover chunk_size canvas
-        // units. The PixelShaderElement area is in canvas (logical) units, so
-        // geometry(scale) = chunk_size * scale = bake_px → fills the FBO exactly.
+        // bake_px interior texels cover chunk_size canvas units (scale < 1 at
+        // coarse LODs). The PixelShaderElement area is the apron-padded span in
+        // canvas (logical) units, so geometry(scale) = area_canvas * scale ≈
+        // fbo_px, covering the FBO (exactly at integer output_scale; up to ~0.5
+        // texel short at the far edge otherwise — that slack lands in the
+        // discarded apron, not the interior crop).
         let scale = bake_px as f64 / chunk_size as f64;
+        let (area_canvas, fbo_px, apron_canvas) = apron_dims(chunk_size, bake_px);
 
-        let buf_size = Size::<i32, Buffer>::from((bake_px, bake_px));
+        let buf_size = Size::<i32, Buffer>::from((fbo_px, fbo_px));
         let mut tex =
             match Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, buf_size) {
                 Ok(t) => t,
@@ -126,7 +168,9 @@ impl ShaderChunkCache {
                 }
             };
 
-        let area = Rectangle::<i32, Logical>::from_size((chunk_size, chunk_size).into());
+        // Render over [origin - apron, origin + chunk_size + apron]; u_camera
+        // shifts by the apron so the shader still sees absolute canvas positions.
+        let area = Rectangle::<i32, Logical>::from_size((area_canvas, area_canvas).into());
         // u_time/u_zoom are pushed because the program declares all of
         // BG_UNIFORMS; eligible shaders don't read them (the eligibility gate
         // rejects u_time/u_zoom shaders), so the constants are inert.
@@ -136,7 +180,13 @@ impl ShaderChunkCache {
             Some(vec![area]),
             1.0,
             vec![
-                Uniform::new("u_camera", (origin.x as f32, origin.y as f32)),
+                Uniform::new(
+                    "u_camera",
+                    (
+                        (origin.x - apron_canvas) as f32,
+                        (origin.y - apron_canvas) as f32,
+                    ),
+                ),
                 Uniform::new("u_time", 0.0f32),
                 Uniform::new("u_zoom", 1.0f32),
             ],
@@ -152,7 +202,7 @@ impl ShaderChunkCache {
                 }
             };
             let mut dt = OutputDamageTracker::new(
-                Size::<i32, Physical>::from((bake_px, bake_px)),
+                Size::<i32, Physical>::from((fbo_px, fbo_px)),
                 Scale::from(scale),
                 Transform::Normal,
             );
@@ -165,7 +215,7 @@ impl ShaderChunkCache {
             return;
         }
 
-        let bytes = (bake_px as u64) * (bake_px as u64) * 4;
+        let bytes = (fbo_px as u64) * (fbo_px as u64) * 4;
         self.chunks.insert((lod, cx, cy), tex);
         self.chunk_meta.insert(
             (lod, cx, cy),
@@ -264,9 +314,13 @@ impl ShaderChunkCache {
         // Graceful degrade: if cover + sharp working set can't both fit the
         // budget, baking sharp chunks would just evict still-visible ones every
         // frame (thrash + a busy-loop via `pending`). Skip fine refine and show
-        // the coarse cover — blurrier, but stable. Each chunk is bake_px² * 4.
-        let bytes_per_chunk = (self.bake_px as u64).pow(2) * 4;
-        let working_set = (cover.len() + visible_target.len()) as u64 * bytes_per_chunk;
+        // the coarse cover — blurrier, but stable.
+        let chunk_bytes = |canvas_size: i32| {
+            let (_, fbo_px, _) = apron_dims(canvas_size, self.bake_px);
+            (fbo_px as u64).pow(2) * 4
+        };
+        let working_set = cover.len() as u64 * chunk_bytes(coarsest_size)
+            + visible_target.len() as u64 * chunk_bytes(target_size);
         let degraded = working_set > self.vram_budget_bytes;
         if degraded != self.degraded {
             self.degraded = degraded;
@@ -363,7 +417,9 @@ impl ShaderChunkCache {
                     Kind::Unspecified,
                 )
             });
-            // Idempotent when `area` is unchanged — no commit bump, no damage.
+            // Crop to the apron interior (see [`set_src`]). Both calls are
+            // no-ops when unchanged, so a static frame produces no damage.
+            elem.set_src(interior_src(chunk_size, self.bake_px));
             elem.resize(area, Some(opaque));
             out.push(PixelSnapRescaleElement::from_element(
                 elem.clone(),

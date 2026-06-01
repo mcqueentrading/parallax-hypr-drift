@@ -28,6 +28,9 @@ pub struct TileShaderElement {
     id: Id,
     commit_counter: CommitCounter,
     area: Rectangle<i32, Logical>,
+    /// Sampled sub-rect of the texture, in buffer (texel) coords; full texture
+    /// unless cropped via [`set_src`](Self::set_src).
+    src: Rectangle<f64, smithay::utils::Buffer>,
     opaque_regions: Vec<Rectangle<i32, Logical>>,
     alpha: f32,
     additional_uniforms: Vec<Uniform<'static>>,
@@ -55,6 +58,7 @@ impl TileShaderElement {
             id: Id::new(),
             commit_counter: CommitCounter::default(),
             area,
+            src: Rectangle::from_size((tex_w as f64, tex_h as f64).into()),
             opaque_regions: opaque_regions.unwrap_or_default(),
             alpha,
             additional_uniforms: additional_uniforms
@@ -74,6 +78,17 @@ impl TileShaderElement {
         if self.area != area || self.opaque_regions != opaque_regions {
             self.area = area;
             self.opaque_regions = opaque_regions;
+            self.commit_counter.increment();
+        }
+    }
+
+    /// Crop the sampled region to a texture sub-rect (buffer/texel coords).
+    /// Used to display only the interior of an apron-padded bake so edge
+    /// bilinear sampling reads neighbor-continuation texels instead of clamping.
+    /// No-op (no commit bump) when unchanged, so it's safe to call every frame.
+    pub fn set_src(&mut self, src: Rectangle<f64, smithay::utils::Buffer>) {
+        if self.src != src {
+            self.src = src;
             self.commit_counter.increment();
         }
     }
@@ -107,7 +122,7 @@ impl Element for TileShaderElement {
     }
 
     fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
-        Rectangle::from_size((self.tex_w as f64, self.tex_h as f64).into())
+        self.src
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
