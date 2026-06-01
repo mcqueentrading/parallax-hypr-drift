@@ -362,6 +362,14 @@ fn try_init_texture_bg(
     path: &str,
     mode: TextureBgMode,
 ) -> Result<(), String> {
+    // The `image` crate is built PNG/JPEG-only; TIFF is handled solely in tile mode.
+    if matches!(mode, TextureBgMode::Wallpaper) && is_tiff_path(path) {
+        return Err(format!(
+            "wallpaper '{path}': TIFF isn't supported in wallpaper mode (PNG/JPEG only) \
+             — use [background] type = \"tile\" for TIFF images"
+        ));
+    }
+
     let (texture, w, h) = load_image_to_texture(renderer, path)?;
 
     let shader_slot = match mode {
