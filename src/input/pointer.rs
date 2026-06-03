@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use smithay::{
     backend::input::{
-        Axis, AxisSource, ButtonState, Event, InputBackend, PointerAxisEvent, PointerButtonEvent,
+        Axis, AxisSource, ButtonState, Device, DeviceCapability, Event, InputBackend,
+        PointerAxisEvent, PointerButtonEvent,
     },
     input::pointer::{
         AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData, MotionEvent,
@@ -72,14 +73,19 @@ impl DriftWm {
             // A 3-finger tap (LRM button map) generates BTN_MIDDLE.
             // Buffer it — if a 3-finger swipe follows within 300ms, suppress
             // the click and enter window-move mode. Otherwise flush to client (paste).
-            // Skip buffering when a modifier binding matches (e.g. alt+middle → fullscreen).
-            if button == config::BTN_MIDDLE && {
-                let kb = self.seat.get_keyboard().unwrap();
-                let ctx = self.pointer_context(pointer.current_location());
-                self.config
-                    .mouse_button_lookup_ctx(&kb.modifier_state(), button, ctx)
-                    .is_none()
-            } {
+            // Gate buffering to gesture-capable devices — only touchpads emit the
+            // 3-finger swipe; a real mouse's middle click must not be delayed.
+            // Skip too when a modifier binding matches (e.g. alt+middle).
+            if button == config::BTN_MIDDLE
+                && event.device().has_capability(DeviceCapability::Gesture)
+                && {
+                    let kb = self.seat.get_keyboard().unwrap();
+                    let ctx = self.pointer_context(pointer.current_location());
+                    self.config
+                        .mouse_button_lookup_ctx(&kb.modifier_state(), button, ctx)
+                        .is_none()
+                }
+            {
                 // Cancel any existing pending click first
                 if let Some(old) = self.pending_middle_click.take() {
                     self.loop_handle.remove(old.timer_token);
