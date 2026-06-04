@@ -350,6 +350,9 @@ impl XdgShellHandler for DriftWm {
                 }
             }
             self.space.unmap_elem(window);
+            // The window may have sat under the cursor; re-target pointer focus
+            // now that it's gone so clicks don't fall into the destroyed surface.
+            self.refresh_pointer_focus();
         }
         self.stable_snap_rects.remove(&wl_surface.id());
     }

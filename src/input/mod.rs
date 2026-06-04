@@ -280,6 +280,42 @@ impl DriftWm {
         });
     }
 
+    /// Recompute pointer focus at the current cursor location and dispatch a
+    /// synthetic motion. Call after the scene under the cursor changes without a
+    /// real pointer event (e.g. the window under the cursor closes): smithay's
+    /// `PointerHandle` keeps its last focus until the next `motion()`, so without
+    /// this, button/axis events keep routing to the destroyed surface until the
+    /// user physically moves the pointer.
+    pub(crate) fn refresh_pointer_focus(&mut self) {
+        if !matches!(self.session_lock, crate::state::SessionLock::Unlocked) {
+            return;
+        }
+        let pointer = self.seat.get_pointer().unwrap();
+        let canvas_pos = pointer.current_location();
+        let screen_pos = driftwm::canvas::canvas_to_screen(
+            driftwm::canvas::CanvasPos(canvas_pos),
+            self.camera(),
+            self.zoom(),
+        )
+        .0;
+        let old_focus = pointer.current_focus();
+        let under = self.pointer_focus_under(screen_pos, canvas_pos);
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = self.start_time.elapsed().as_millis() as u32;
+        pointer.motion(
+            self,
+            under,
+            &MotionEvent {
+                location: canvas_pos,
+                serial,
+                time,
+            },
+        );
+        pointer.frame(self);
+        self.update_decoration_cursor(canvas_pos);
+        self.update_pointer_constraint(old_focus);
+    }
+
     fn on_pointer_motion_absolute<I: InputBackend>(
         &mut self,
         event: I::PointerMotionAbsoluteEvent,
