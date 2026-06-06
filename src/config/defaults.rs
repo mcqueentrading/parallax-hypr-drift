@@ -116,28 +116,42 @@ pub(super) fn default_bindings(
                 modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_1),
             },
-            Action::GoToPosition(-1750.0, 1750.0),
+            Action::GoToWorkspace(1),
         ),
         (
             KeyCombo {
                 modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_2),
             },
-            Action::GoToPosition(1750.0, 1750.0),
+            Action::GoToWorkspace(2),
         ),
         (
             KeyCombo {
                 modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_3),
             },
-            Action::GoToPosition(1750.0, -1750.0),
+            Action::GoToWorkspace(3),
         ),
         (
             KeyCombo {
                 modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_4),
             },
-            Action::GoToPosition(-1750.0, -1750.0),
+            Action::GoToWorkspace(4),
+        ),
+        (
+            KeyCombo {
+                modifiers: m.clone(),
+                sym: Keysym::from(keysyms::KEY_5),
+            },
+            Action::GoToWorkspace(5),
+        ),
+        (
+            KeyCombo {
+                modifiers: m.clone(),
+                sym: Keysym::from(keysyms::KEY_6),
+            },
+            Action::GoToWorkspace(6),
         ),
         (
             KeyCombo {
@@ -243,6 +257,13 @@ pub(super) fn default_bindings(
                 sym: Keysym::from(keysyms::KEY_f),
             },
             Action::ToggleFullscreen,
+        ),
+        (
+            KeyCombo {
+                modifiers: m.clone(),
+                sym: Keysym::from(keysyms::KEY_v),
+            },
+            Action::ToggleFloating,
         ),
         (
             KeyCombo {

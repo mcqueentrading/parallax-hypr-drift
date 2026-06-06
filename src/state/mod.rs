@@ -11,6 +11,7 @@ pub mod persistence;
 mod reload;
 mod render_cache;
 mod tile;
+mod workspace;
 pub use cluster_snapshot::ClusterResizeSnapshot;
 pub(crate) use cluster_snapshot::snap_targets_impl;
 pub use cursor::{CursorFrames, CursorState};
@@ -18,6 +19,7 @@ pub use errors::ErrorSource;
 pub use focus::FocusTarget;
 pub use persistence::{read_all_per_output_state, remove_state_file};
 pub use render_cache::{BorderCacheEntry, RenderCache, ShadowCacheEntry};
+pub use workspace::{WorkspaceId, WorkspaceState};
 
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -450,6 +452,9 @@ pub struct DriftWm {
         smithay::reexports::wayland_server::backend::ObjectId,
         smithay::reexports::wayland_server::backend::ObjectId,
     >,
+    /// Six visible Hyprland-style workspace zones on the infinite canvas.
+    pub workspaces: HashMap<WorkspaceId, WorkspaceState>,
+    pub active_workspace: WorkspaceId,
 
     pub focus_history: Vec<Window>,
     pub cycle_state: Option<usize>,

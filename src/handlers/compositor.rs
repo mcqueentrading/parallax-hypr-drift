@@ -418,13 +418,8 @@ impl CompositorHandler for DriftWm {
                         };
                         let activate = applied.as_ref().is_none_or(|a| !a.widget);
                         self.space.map_element(window.clone(), pos, activate);
-                        if matches!(
-                            self.config.window_placement,
-                            driftwm::config::WindowPlacement::Tile
-                        ) {
-                            self.tile_windows();
-                            self.stabilize_tiled_workspace_view();
-                        }
+                        self.tile_windows();
+                        self.stabilize_tiled_workspace_view();
                     }
 
                     if let Some(toplevel) = window.toplevel() {
@@ -506,6 +501,7 @@ impl CompositorHandler for DriftWm {
                         }
 
                         let is_widget = applied.as_ref().is_some_and(|a| a.widget);
+                        let is_floating = self.floating_windows.contains(&root.id());
                         // Deferred fit/fullscreen will override camera/zoom/raise
                         // /focus — skip navigate_to_window then.
                         let deferred_fit_or_fs = self.pending_fit.contains(&root)
@@ -513,10 +509,7 @@ impl CompositorHandler for DriftWm {
                         if !is_widget
                             && !is_fullscreen
                             && !deferred_fit_or_fs
-                            && !matches!(
-                                self.config.window_placement,
-                                driftwm::config::WindowPlacement::Tile
-                            )
+                            && is_floating
                         {
                             let reset = self.config.zoom_reset_on_new_window;
                             // Cursor mode is "stay put" by default; only

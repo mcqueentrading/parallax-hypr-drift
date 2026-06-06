@@ -49,6 +49,7 @@ pub enum Action {
     CycleWindows { backward: bool },
     HomeToggle,
     GoToPosition(f64, f64),
+    GoToWorkspace(u8),
     ZoomIn,
     ZoomOut,
     ZoomReset,

@@ -282,6 +282,8 @@ impl DriftWm {
             floating_windows: HashSet::new(),
             tile_rects: HashMap::new(),
             pending_tile_anchors: HashMap::new(),
+            workspaces: crate::state::workspace::default_workspaces(),
+            active_workspace: 1,
             focus_history: Vec::new(),
             cycle_state: None,
             held_action: None,

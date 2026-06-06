@@ -35,6 +35,9 @@ impl DriftWm {
         } else {
             self.floating_windows.insert(id.clone());
             self.tile_rects.remove(&id);
+            for workspace in self.workspaces.values_mut() {
+                workspace.tile_rects.remove(&id);
+            }
             let usable = self.get_usable_area();
             let camera = self.camera().to_i32_round::<i32>();
             let width = (usable.size.w as f64 * 0.55).round() as i32;
@@ -64,14 +67,13 @@ impl DriftWm {
     }
 
     fn current_tile_area(&self) -> Rectangle<i32, Logical> {
-        let usable = self.get_usable_area();
-        let camera = self.camera().to_i32_round::<i32>();
+        let workspace = self.active_workspace_rect();
         let gap = self.config.snap_gap.max(0.0).round() as i32;
         Rectangle::new(
-            Point::from((camera.x + usable.loc.x + gap, camera.y + usable.loc.y + gap)),
+            Point::from((workspace.loc.x + gap, workspace.loc.y + gap)),
             Size::from((
-                (usable.size.w - gap * 2).max(80),
-                (usable.size.h - gap * 2).max(80),
+                (workspace.size.w - gap * 2).max(80),
+                (workspace.size.h - gap * 2).max(80),
             )),
         )
     }
@@ -113,39 +115,53 @@ impl DriftWm {
         }
     }
 
-    fn largest_tiled_window(&self, windows: &[Window]) -> Option<ObjectId> {
+    fn largest_tiled_window(
+        &self,
+        windows: &[Window],
+        tile_rects: &std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
+    ) -> Option<ObjectId> {
         windows
             .iter()
             .filter_map(|window| {
                 let id = Self::window_object_id(window)?;
-                let rect = self.tile_rects.get(&id)?;
+                let rect = tile_rects.get(&id)?;
                 Some((id, rect.size.w.saturating_mul(rect.size.h)))
             })
             .max_by_key(|(_, area)| *area)
             .map(|(id, _)| id)
     }
 
-    fn pointer_tiled_window(&self, windows: &[Window]) -> Option<ObjectId> {
+    fn pointer_tiled_window(
+        &self,
+        windows: &[Window],
+        tile_rects: &std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
+    ) -> Option<ObjectId> {
         let pointer = self.seat.get_pointer()?;
         let pos = pointer.current_location().to_i32_round::<i32>();
         windows.iter().find_map(|window| {
             let id = Self::window_object_id(window)?;
-            let rect = self.tile_rects.get(&id)?;
+            let rect = tile_rects.get(&id)?;
             rect.contains(pos).then_some(id)
         })
     }
 
-    fn focused_tiled_window(&self, windows: &[Window]) -> Option<ObjectId> {
+    fn focused_tiled_window(
+        &self,
+        windows: &[Window],
+        tile_rects: &std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
+    ) -> Option<ObjectId> {
         let focused = self.focused_window()?;
         let focused_id = Self::window_object_id(&focused)?;
         windows
             .iter()
             .filter_map(Self::window_object_id)
-            .any(|id| id == focused_id)
+            .any(|id| id == focused_id && tile_rects.contains_key(&id))
             .then_some(focused_id)
     }
 
     pub fn tile_windows(&mut self) {
+        self.sync_active_workspace_from_pointer();
+
         self.floating_windows.retain(|id| {
             self.space
                 .elements()
@@ -163,54 +179,101 @@ impl DriftWm {
             return;
         }
 
-        let window_ids: Vec<ObjectId> = windows
+        let all_window_ids: Vec<ObjectId> = windows
             .iter()
             .filter_map(Self::window_object_id)
             .collect();
-        self.tile_rects
-            .retain(|id, _| window_ids.iter().any(|window_id| window_id == id));
+        let active_workspace = self.active_workspace;
+
+        for workspace in self.workspaces.values_mut() {
+            workspace
+                .windows
+                .retain(|id| all_window_ids.iter().any(|window_id| window_id == id));
+            workspace
+                .tile_rects
+                .retain(|id, _| workspace.windows.contains(id));
+        }
+
+        let assigned_ids: Vec<ObjectId> = self
+            .workspaces
+            .values()
+            .flat_map(|workspace| workspace.windows.iter().cloned())
+            .collect();
+        if let Some(workspace) = self.workspaces.get_mut(&active_workspace) {
+            for id in &all_window_ids {
+                if !assigned_ids.iter().any(|assigned| assigned == id) {
+                    workspace.windows.insert(id.clone());
+                }
+            }
+        }
+
+        let active_window_ids: Vec<ObjectId> = self
+            .workspaces
+            .get(&active_workspace)
+            .map(|workspace| workspace.windows.iter().cloned().collect())
+            .unwrap_or_default();
+        let windows: Vec<Window> = windows
+            .into_iter()
+            .filter(|window| {
+                Self::window_object_id(window)
+                    .is_some_and(|id| active_window_ids.iter().any(|active_id| active_id == &id))
+            })
+            .collect();
+        if windows.is_empty() {
+            return;
+        }
 
         let full_area = self.current_tile_area();
         let gap = self.config.snap_gap.max(0.0).round() as i32;
-        let new_ids: Vec<ObjectId> = window_ids
+        let active_tile_rects = self
+            .workspaces
+            .get(&active_workspace)
+            .map(|workspace| workspace.tile_rects.clone())
+            .unwrap_or_default();
+        let mut next_tile_rects = active_tile_rects;
+        let new_ids: Vec<ObjectId> = active_window_ids
             .iter()
-            .filter(|id| !self.tile_rects.contains_key(id))
+            .filter(|id| !next_tile_rects.contains_key(id))
             .cloned()
             .collect();
 
         for new_id in new_ids {
-            if self.tile_rects.is_empty() {
-                self.tile_rects.insert(new_id, full_area);
+            if next_tile_rects.is_empty() {
+                next_tile_rects.insert(new_id, full_area);
                 continue;
             }
 
             let anchor_id = self
                 .pending_tile_anchors
                 .remove(&new_id)
-                .filter(|id| self.tile_rects.contains_key(id))
-                .or_else(|| self.pointer_tiled_window(&windows))
-                .or_else(|| self.focused_tiled_window(&windows))
-                .or_else(|| self.largest_tiled_window(&windows));
+                .filter(|id| next_tile_rects.contains_key(id))
+                .or_else(|| self.pointer_tiled_window(&windows, &next_tile_rects))
+                .or_else(|| self.focused_tiled_window(&windows, &next_tile_rects))
+                .or_else(|| self.largest_tiled_window(&windows, &next_tile_rects));
 
             let Some(anchor_id) = anchor_id else {
-                self.tile_rects.insert(new_id, full_area);
+                next_tile_rects.insert(new_id, full_area);
                 continue;
             };
-            let Some(anchor_rect) = self.tile_rects.get(&anchor_id).cloned() else {
-                self.tile_rects.insert(new_id, full_area);
+            let Some(anchor_rect) = next_tile_rects.get(&anchor_id).cloned() else {
+                next_tile_rects.insert(new_id, full_area);
                 continue;
             };
 
             let (anchor_new_rect, new_rect) = Self::split_rect(anchor_rect, gap);
-            self.tile_rects.insert(anchor_id, anchor_new_rect);
-            self.tile_rects.insert(new_id, new_rect);
+            next_tile_rects.insert(anchor_id, anchor_new_rect);
+            next_tile_rects.insert(new_id, new_rect);
+        }
+
+        if let Some(workspace) = self.workspaces.get_mut(&active_workspace) {
+            workspace.tile_rects = next_tile_rects.clone();
         }
 
         for window in windows.iter() {
             let Some(id) = Self::window_object_id(window) else {
                 continue;
             };
-            let Some(rect) = self.tile_rects.get(&id).cloned() else {
+            let Some(rect) = next_tile_rects.get(&id).cloned() else {
                 continue;
             };
             let loc = rect.loc;

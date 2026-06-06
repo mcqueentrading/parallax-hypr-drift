@@ -7,6 +7,8 @@ canvas with a Hyprland-inspired tiling workflow. It keeps upstream DriftWM as
 the base, then adds:
 
 - Hyprland-style split placement for new tiled windows
+- six visible workspace zones on one infinite canvas (`Mod+1` through `Mod+6`)
+- mandatory workspace-bounded tiling for normal windows
 - `toggle-floating` window action
 - focus-follows-cursor support enabled in the parallax config
 - stronger DBus/Wayland environment export for launched apps
@@ -16,6 +18,12 @@ the base, then adds:
 The `parallax-hypr-drift/` folder contains the custom config, shader, and
 launcher example. Private machine-specific session wiring should stay outside
 the public repo.
+
+The fork treats each numbered zone as a Hyprland-like workspace, but all six
+zones remain part of the same visible DriftWM canvas. The default topology is a
+cube-net layout: `2` is the front/center zone, `1` is left, `3` is right, `4`
+is above, `5` is below, and `6` is the back zone. New normal windows tile
+inside the active zone; `Mod+V` toggles the focused window into floating mode.
 
 The upstream DriftWM README continues below for base compositor details.
 

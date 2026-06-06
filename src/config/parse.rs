@@ -123,6 +123,17 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
                 .map_err(|_| format!("invalid y coordinate: {}", parts[1]))?;
             Ok(Action::GoToPosition(x, y))
         }
+        "workspace" | "go-to-workspace" => {
+            let arg = arg.ok_or("workspace requires an id: workspace <1-6>")?;
+            let id: u8 = arg
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid workspace id: {}", arg.trim()))?;
+            if !(1..=6).contains(&id) {
+                return Err(format!("workspace id must be 1-6, got {id}"));
+            }
+            Ok(Action::GoToWorkspace(id))
+        }
         "zoom-in" => Ok(Action::ZoomIn),
         "zoom-out" => Ok(Action::ZoomOut),
         "zoom-reset" => Ok(Action::ZoomReset),

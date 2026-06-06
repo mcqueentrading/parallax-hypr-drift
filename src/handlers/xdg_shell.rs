@@ -67,10 +67,7 @@ impl XdgShellHandler for DriftWm {
         self.auto_anchor_snapshot
             .insert(wl_surface.clone(), prev_focus_window);
 
-        if matches!(
-            self.config.window_placement,
-            driftwm::config::WindowPlacement::Tile
-        ) && let Some(pointer) = self.seat.get_pointer()
+        if let Some(pointer) = self.seat.get_pointer()
         {
             let cursor_pos = pointer.current_location();
             if let Some((anchor, _)) = self.space.element_under(cursor_pos)

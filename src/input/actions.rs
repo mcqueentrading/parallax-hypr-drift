@@ -291,6 +291,9 @@ impl DriftWm {
                 self.set_overview_return(None);
                 self.set_camera_target(Some(target_camera));
             }
+            Action::GoToWorkspace(id) => {
+                self.activate_workspace(*id);
+            }
             Action::ZoomIn => {
                 let new_zoom = (self.zoom() * self.config.zoom_step).min(canvas::MAX_ZOOM);
                 let new_zoom = canvas::snap_zoom(new_zoom);
