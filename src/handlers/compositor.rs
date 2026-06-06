@@ -545,6 +545,7 @@ impl CompositorHandler for DriftWm {
                         // `fit_window_snapped` overwrites with the post-fit
                         // rect; non-snapped fit and fullscreen keep this.
                         self.refresh_stable_snap_rect(&window);
+                        self.sync_pointer_focus_under_cursor();
 
                         if self.pending_fullscreen.remove(&root) {
                             self.enter_fullscreen(&window);

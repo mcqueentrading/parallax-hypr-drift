@@ -24,7 +24,7 @@ use smithay::wayland::compositor::{RectangleKind, RegionAttributes};
 
 use crate::decorations::DecorationHit;
 use crate::state::{DriftWm, FocusTarget};
-use driftwm::canvas::{ScreenPos, screen_to_canvas};
+use driftwm::canvas::{CanvasPos, ScreenPos, canvas_to_screen, screen_to_canvas};
 use driftwm::protocols::output_power::OutputPowerHandler;
 
 /// Find the canvas-space element location of the window that owns the given surface.
@@ -229,6 +229,43 @@ impl DriftWm {
 
         let serial = SERIAL_COUNTER.next_serial();
         keyboard.set_focus(self, focus_surface, serial);
+    }
+
+    /// Re-run the normal pointer hit-test/focus path without requiring a real
+    /// mouse move. This keeps focus-follows-mouse active immediately after the
+    /// first window maps or a tiled layout reshuffles under a stationary cursor.
+    pub fn sync_pointer_focus_under_cursor(&mut self) {
+        if !self.config.focus_follows_mouse {
+            return;
+        }
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let Some(output) = self.active_output() else {
+            return;
+        };
+        if self.space.output_geometry(&output).is_none() {
+            return;
+        }
+
+        let canvas_pos = pointer.current_location();
+        let screen_pos = canvas_to_screen(CanvasPos(canvas_pos), self.camera(), self.zoom()).0;
+        let old_focus = pointer.current_focus();
+        let under = self.pointer_focus_under(screen_pos, canvas_pos);
+        let serial = SERIAL_COUNTER.next_serial();
+        pointer.motion(
+            self,
+            under,
+            &MotionEvent {
+                location: canvas_pos,
+                serial,
+                time: 0,
+            },
+        );
+        pointer.frame(self);
+        self.update_decoration_cursor(canvas_pos);
+        self.update_pointer_constraint(old_focus);
+        self.maybe_hover_focus(canvas_pos);
     }
 
     /// Deactivate the constraint on the previous focus if focus changed,

@@ -491,6 +491,24 @@ impl Config {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
+        for name in [
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_SESSION_TYPE",
+            "XDG_SESSION_CLASS",
+            "XDG_SESSION_DESKTOP",
+            "XDG_CURRENT_DESKTOP",
+            "XDG_DESKTOP_SESSION",
+        ] {
+            if let Ok(value) = std::env::var(name) {
+                child_env.insert(name.to_string(), value);
+            }
+        }
         if let Some(theme) = &raw.cursor.theme {
             child_env.insert("XCURSOR_THEME".into(), theme.clone());
         }

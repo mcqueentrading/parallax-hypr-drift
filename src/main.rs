@@ -150,11 +150,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Config::load() with user [env] overrides taking precedence.
     unsafe { std::env::set_var("XDG_SESSION_CLASS", "user") };
     unsafe { std::env::set_var("XDG_SESSION_DESKTOP", "driftwm") };
+    unsafe { std::env::set_var("XDG_DESKTOP_SESSION", "driftwm") };
 
-    // Add WAYLAND_DISPLAY to child_env for autostart commands
-    data.config
-        .child_env
-        .insert("WAYLAND_DISPLAY".to_string(), socket_name.clone());
+    // Add compositor-created session vars to child_env for autostart and keybind commands.
+    for (key, value) in [
+        ("WAYLAND_DISPLAY", socket_name.as_str()),
+        ("XDG_CURRENT_DESKTOP", "driftwm"),
+        ("XDG_SESSION_TYPE", "wayland"),
+        ("XDG_SESSION_DESKTOP", "driftwm"),
+        ("XDG_DESKTOP_SESSION", "driftwm"),
+        ("XDG_SESSION_CLASS", "user"),
+    ] {
+        data.config.child_env.insert(key.to_string(), value.to_string());
+    }
 
     // Export only session-level vars to systemd and D-Bus. Pass them through
     // Command::env() rather than relying on process env — the policy is "don't
@@ -165,9 +173,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ("XDG_CURRENT_DESKTOP".to_string(), "driftwm".to_string()),
             ("XDG_SESSION_TYPE".to_string(), "wayland".to_string()),
             ("XDG_SESSION_DESKTOP".to_string(), "driftwm".to_string()),
+            ("XDG_DESKTOP_SESSION".to_string(), "driftwm".to_string()),
             ("XDG_SESSION_CLASS".to_string(), "user".to_string()),
         ];
-        for name in ["DBUS_SESSION_BUS_ADDRESS", "PATH", "HOME", "XDG_RUNTIME_DIR"] {
+        for name in [
+            "DBUS_SESSION_BUS_ADDRESS",
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "XDG_RUNTIME_DIR",
+        ] {
             if let Ok(value) = std::env::var(name) {
                 session_vars.push((name.to_string(), value));
             }

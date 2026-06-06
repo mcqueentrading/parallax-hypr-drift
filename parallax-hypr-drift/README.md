@@ -4,11 +4,41 @@ This folder contains the public config assets for the Parallax Hypr Drift fork.
 It is intentionally generic: private machine paths, personal app shortcuts, and
 virtual-terminal login wiring should stay outside this Git repo.
 
+## Project Goal
+
+Parallax Hypr Drift is intended to merge the parts of Hyprland that work best
+for daily use with DriftWM's infinite canvas model.
+
+The target is not "DriftWM with optional tiling". The target is Hyprland-style
+tiling as the foundation, running on an infinite canvas. New windows should
+split the tiled area under the cursor, focus should follow the cursor, and the
+layout should feel like Hyprland's dwindle behavior while still allowing the
+workspace to pan, zoom, and drift beyond a fixed monitor-sized desktop.
+
+The reason this fork starts from DriftWM rather than Hyprland is practical.
+Hyprland already has the mature tiling, input, and desktop behavior we want,
+but its internals are tightly coupled around its own compositor model. Our
+earlier parallax/infinite-canvas experiments showed that changing one part of
+Hyprland can break unrelated behavior because much of the compositor state is
+deeply integrated. DriftWM is easier for us to reshape: its infinite canvas is
+already native, and the codebase has been more approachable for AI-assisted
+iteration.
+
+So the design direction is:
+
+- Keep tiling mandatory for normal windows.
+- Treat floating as an escape hatch for special cases, not as the default mode.
+- Copy Hyprland's behavior where it is proven: dwindle-like splitting,
+  cursor-led focus, reliable keybinds, app launching, XWayland compatibility,
+  and normal desktop session startup.
+- Keep DriftWM's strength: infinite canvas, camera movement, zoom, parallax,
+  and experimental visual space.
+
 ## What This Adds
 
-- Hyprland-inspired tiling: new windows split the tile under the cursor.
+- Mandatory Hyprland-inspired tiling: new windows split the tile under the cursor.
 - Cursor-led focus: moving the pointer over a window selects it.
-- Floating toggle: move a window out of the tiled layout and back in again.
+- Floating escape hatch: temporarily move a special-case window out of the tiled layout.
 - Direct screenshot shortcuts using `grim` and `slurp`.
 - Matrix/parallax-style DriftWM shader background.
 - Stronger DBus/Wayland session environment for apps like Chrome and Codex.
@@ -86,4 +116,3 @@ Screenshots save to:
 ```bash
 $HOME/Pictures
 ```
-

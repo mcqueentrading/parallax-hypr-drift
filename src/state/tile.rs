@@ -225,6 +225,7 @@ impl DriftWm {
             }
             self.space.map_element(window.clone(), loc, false);
         }
+        self.sync_pointer_focus_under_cursor();
         self.mark_all_dirty();
     }
 }
