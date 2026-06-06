@@ -1,3 +1,16 @@
+## Parallax Hypr Drift Fork
+
+This repo is Toni's experimental DriftWM fork for the `parallax-hypr-drift`
+TTY4 session. It keeps upstream DriftWM as the base, then adds:
+
+- optional tile placement for new windows
+- `toggle-floating` window action
+- stronger DBus/Wayland environment export for launched apps
+- TTY3/TTY4 session wrappers
+- parallax Matrix-style shader/config under [`parallax-hypr-drift/`](parallax-hypr-drift/)
+
+The upstream DriftWM README continues below for base compositor details.
+
 <h1 align="center"><img alt="driftwm" src="assets/logo.jpg" width="500"></h1>
 <p align="center">A trackpad-first infinite canvas Wayland compositor.</p>
 <p align="center">
