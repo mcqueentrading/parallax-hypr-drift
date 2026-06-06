@@ -146,8 +146,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &socket_name) };
     unsafe { std::env::set_var("XDG_SESSION_TYPE", "wayland") };
     unsafe { std::env::set_var("XDG_CURRENT_DESKTOP", "driftwm") };
-    // Toolkit env vars (MOZ_ENABLE_WAYLAND, QT_QPA_PLATFORM, ...) live in
-    // Config::load() with user [env] overrides taking precedence.
     unsafe { std::env::set_var("XDG_SESSION_CLASS", "user") };
     unsafe { std::env::set_var("XDG_SESSION_DESKTOP", "driftwm") };
     unsafe { std::env::set_var("XDG_DESKTOP_SESSION", "driftwm") };
@@ -166,18 +164,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .insert(key.to_string(), value.to_string());
     }
 
-    // Export only session-level vars to systemd and D-Bus. Pass them through
-    // Command::env() rather than relying on process env — the policy is "don't
-    // touch process env at runtime", so the shell-out gets only what we hand it.
+    // Hyprland-style session export: make compositor child defaults global,
+    // not just per-keybind TOML env. Terminals launched by DriftWM then pass
+    // the same Wayland/toolkit variables to apps started manually inside them.
+    let child_env_snapshot = data.config.child_env.clone();
+    for (key, value) in &child_env_snapshot {
+        unsafe { std::env::set_var(key, value) };
+    }
+
+    // Export the same environment to systemd-user and D-Bus activation so
+    // apps launched indirectly inherit the graphical session too.
     {
-        let mut session_vars = vec![
-            ("WAYLAND_DISPLAY".to_string(), socket_name.clone()),
-            ("XDG_CURRENT_DESKTOP".to_string(), "driftwm".to_string()),
-            ("XDG_SESSION_TYPE".to_string(), "wayland".to_string()),
-            ("XDG_SESSION_DESKTOP".to_string(), "driftwm".to_string()),
-            ("XDG_DESKTOP_SESSION".to_string(), "driftwm".to_string()),
-            ("XDG_SESSION_CLASS".to_string(), "user".to_string()),
-        ];
+        let mut session_vars: Vec<(String, String)> = child_env_snapshot.into_iter().collect();
         for name in [
             "DBUS_SESSION_BUS_ADDRESS",
             "PATH",

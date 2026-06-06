@@ -91,11 +91,14 @@ pub fn setup(state: &mut DriftWm) {
         child.id()
     );
 
-    // Make DISPLAY visible to children via child_env (process env untouched).
+    // Make DISPLAY visible globally, matching Hyprland's session behavior.
+    // This fixes terminals and D-Bus activated X11 apps, not just keybind
+    // commands launched through DriftWM's internal child_env map.
     state
         .config
         .child_env
         .insert("DISPLAY".into(), display_name.clone());
+    unsafe { std::env::set_var("DISPLAY", &display_name) };
 
     export_display(&display_name);
 
@@ -165,7 +168,7 @@ fn path_present(path: &str) -> bool {
 fn export_display(display_name: &str) {
     let cmd = "systemctl --user import-environment DISPLAY; \
                hash dbus-update-activation-environment 2>/dev/null && \
-               dbus-update-activation-environment DISPLAY";
+               dbus-update-activation-environment --systemd DISPLAY";
     match Command::new("/bin/sh")
         .args(["-c", cmd])
         .env("DISPLAY", display_name)

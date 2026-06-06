@@ -34,6 +34,8 @@ const TOOLKIT_DEFAULTS: &[(&str, &str)] = &[
     ("QT_QPA_PLATFORM", "wayland;xcb"),
     ("SDL_VIDEODRIVER", "wayland,x11"),
     ("GDK_BACKEND", "wayland,x11"),
+    ("NIXOS_OZONE_WL", "1"),
+    ("CHROME_USER_FLAGS", "--ozone-platform=wayland"),
     ("ELECTRON_OZONE_PLATFORM_HINT", "wayland"),
 ];
 
