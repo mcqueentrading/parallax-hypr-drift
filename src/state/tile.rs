@@ -1,7 +1,7 @@
 use driftwm::window_ext::WindowExt;
 use smithay::desktop::Window;
 use smithay::reexports::wayland_server::{Resource, backend::ObjectId};
-use smithay::utils::{Logical, Point, Size};
+use smithay::utils::{Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::{DriftWm, FocusTarget};
@@ -33,7 +33,8 @@ impl DriftWm {
         if self.floating_windows.remove(&id) {
             self.tile_windows();
         } else {
-            self.floating_windows.insert(id);
+            self.floating_windows.insert(id.clone());
+            self.tile_rects.remove(&id);
             let usable = self.get_usable_area();
             let camera = self.camera().to_i32_round::<i32>();
             let width = (usable.size.w as f64 * 0.55).round() as i32;
@@ -62,6 +63,78 @@ impl DriftWm {
         }
     }
 
+    fn current_tile_area(&self) -> Rectangle<i32, Logical> {
+        let usable = self.get_usable_area();
+        let camera = self.camera().to_i32_round::<i32>();
+        let gap = self.config.snap_gap.max(0.0).round() as i32;
+        Rectangle::new(
+            Point::from((camera.x + usable.loc.x + gap, camera.y + usable.loc.y + gap)),
+            Size::from((
+                (usable.size.w - gap * 2).max(80),
+                (usable.size.h - gap * 2).max(80),
+            )),
+        )
+    }
+
+    fn split_rect(
+        rect: Rectangle<i32, Logical>,
+        gap: i32,
+    ) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
+        if rect.size.w >= rect.size.h {
+            let first_w = ((rect.size.w - gap) / 2).max(80);
+            let second_w = (rect.size.w - first_w - gap).max(80);
+            (
+                Rectangle::new(rect.loc, Size::from((first_w, rect.size.h))),
+                Rectangle::new(
+                    Point::from((rect.loc.x + first_w + gap, rect.loc.y)),
+                    Size::from((second_w, rect.size.h)),
+                ),
+            )
+        } else {
+            let first_h = ((rect.size.h - gap) / 2).max(80);
+            let second_h = (rect.size.h - first_h - gap).max(80);
+            (
+                Rectangle::new(rect.loc, Size::from((rect.size.w, first_h))),
+                Rectangle::new(
+                    Point::from((rect.loc.x, rect.loc.y + first_h + gap)),
+                    Size::from((rect.size.w, second_h)),
+                ),
+            )
+        }
+    }
+
+    fn largest_tiled_window(&self, windows: &[Window]) -> Option<ObjectId> {
+        windows
+            .iter()
+            .filter_map(|window| {
+                let id = Self::window_object_id(window)?;
+                let rect = self.tile_rects.get(&id)?;
+                Some((id, rect.size.w.saturating_mul(rect.size.h)))
+            })
+            .max_by_key(|(_, area)| *area)
+            .map(|(id, _)| id)
+    }
+
+    fn pointer_tiled_window(&self, windows: &[Window]) -> Option<ObjectId> {
+        let pointer = self.seat.get_pointer()?;
+        let pos = pointer.current_location().to_i32_round::<i32>();
+        windows.iter().find_map(|window| {
+            let id = Self::window_object_id(window)?;
+            let rect = self.tile_rects.get(&id)?;
+            rect.contains(pos).then_some(id)
+        })
+    }
+
+    fn focused_tiled_window(&self, windows: &[Window]) -> Option<ObjectId> {
+        let focused = self.focused_window()?;
+        let focused_id = Self::window_object_id(&focused)?;
+        windows
+            .iter()
+            .filter_map(Self::window_object_id)
+            .any(|id| id == focused_id)
+            .then_some(focused_id)
+    }
+
     pub fn tile_windows(&mut self) {
         self.floating_windows.retain(|id| {
             self.space
@@ -80,29 +153,58 @@ impl DriftWm {
             return;
         }
 
-        let usable = self.get_usable_area();
-        let camera = self.camera().to_i32_round::<i32>();
+        let window_ids: Vec<ObjectId> = windows
+            .iter()
+            .filter_map(Self::window_object_id)
+            .collect();
+        self.tile_rects
+            .retain(|id, _| window_ids.iter().any(|window_id| window_id == id));
+
+        let full_area = self.current_tile_area();
         let gap = self.config.snap_gap.max(0.0).round() as i32;
+        let new_ids: Vec<ObjectId> = window_ids
+            .iter()
+            .filter(|id| !self.tile_rects.contains_key(id))
+            .cloned()
+            .collect();
 
-        let area_x = camera.x + usable.loc.x;
-        let area_y = camera.y + usable.loc.y;
-        let area_w = usable.size.w;
-        let area_h = usable.size.h;
+        for new_id in new_ids {
+            if self.tile_rects.is_empty() {
+                self.tile_rects.insert(new_id, full_area);
+                continue;
+            }
 
-        let cols = (count as f64).sqrt().ceil() as i32;
-        let rows = ((count as i32 + cols - 1) / cols).max(1);
-        let tile_w = ((area_w - gap * (cols + 1)) / cols).max(80);
-        let tile_h = ((area_h - gap * (rows + 1)) / rows).max(80);
+            let anchor_id = self
+                .pending_tile_anchors
+                .remove(&new_id)
+                .filter(|id| self.tile_rects.contains_key(id))
+                .or_else(|| self.pointer_tiled_window(&windows))
+                .or_else(|| self.focused_tiled_window(&windows))
+                .or_else(|| self.largest_tiled_window(&windows));
 
-        for (idx, window) in windows.iter().enumerate() {
-            let idx = idx as i32;
-            let col = idx % cols;
-            let row = idx / cols;
-            let loc = Point::<i32, Logical>::from((
-                area_x + gap + col * (tile_w + gap),
-                area_y + gap + row * (tile_h + gap),
-            ));
-            let size = Size::<i32, Logical>::from((tile_w, tile_h));
+            let Some(anchor_id) = anchor_id else {
+                self.tile_rects.insert(new_id, full_area);
+                continue;
+            };
+            let Some(anchor_rect) = self.tile_rects.get(&anchor_id).cloned() else {
+                self.tile_rects.insert(new_id, full_area);
+                continue;
+            };
+
+            let (anchor_new_rect, new_rect) = Self::split_rect(anchor_rect, gap);
+            self.tile_rects.insert(anchor_id, anchor_new_rect);
+            self.tile_rects.insert(new_id, new_rect);
+        }
+
+        for window in windows.iter() {
+            let Some(id) = Self::window_object_id(window) else {
+                continue;
+            };
+            let Some(rect) = self.tile_rects.get(&id).cloned() else {
+                continue;
+            };
+            let loc = rect.loc;
+            let size = rect.size;
 
             if let Some(toplevel) = window.toplevel() {
                 crate::handlers::set_tiled_states(&toplevel);

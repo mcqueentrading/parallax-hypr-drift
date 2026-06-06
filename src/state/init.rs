@@ -280,6 +280,8 @@ impl DriftWm {
             pending_recenter: HashMap::new(),
             stable_snap_rects: HashMap::new(),
             floating_windows: HashSet::new(),
+            tile_rects: HashMap::new(),
+            pending_tile_anchors: HashMap::new(),
             focus_history: Vec::new(),
             cycle_state: None,
             held_action: None,

@@ -3,6 +3,7 @@
 
 mod_key = "super"
 window_placement = "tile"
+focus_follows_mouse = true
 
 [input.keyboard]
 layout = "gb"

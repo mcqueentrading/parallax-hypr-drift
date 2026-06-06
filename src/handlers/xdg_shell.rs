@@ -67,6 +67,22 @@ impl XdgShellHandler for DriftWm {
         self.auto_anchor_snapshot
             .insert(wl_surface.clone(), prev_focus_window);
 
+        if matches!(
+            self.config.window_placement,
+            driftwm::config::WindowPlacement::Tile
+        ) && let Some(pointer) = self.seat.get_pointer()
+        {
+            let cursor_pos = pointer.current_location();
+            if let Some((anchor, _)) = self.space.element_under(cursor_pos)
+                && let (Some(new_id), Some(anchor_id)) = (
+                    Some(wl_surface.id()),
+                    anchor.wl_surface().map(|s| s.id()),
+                )
+            {
+                self.pending_tile_anchors.insert(new_id, anchor_id);
+            }
+        }
+
         // Initial configure is deferred to ensure_initial_configure in
         // compositor.rs first-commit handler so rule-resolved state (size,
         // decoration_mode, tiled) can be batched into a single configure.

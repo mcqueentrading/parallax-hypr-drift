@@ -1,13 +1,21 @@
 ## Parallax Hypr Drift Fork
 
-This repo is Toni's experimental DriftWM fork for the `parallax-hypr-drift`
-TTY4 session. It keeps upstream DriftWM as the base, then adds:
+This repo is an experimental DriftWM fork that blends DriftWM's infinite
+canvas with a Hyprland-inspired tiling workflow. It keeps upstream DriftWM as
+the base, then adds:
 
-- optional tile placement for new windows
+- Hyprland-style split placement for new tiled windows
 - `toggle-floating` window action
+- focus-follows-cursor support enabled in the parallax config
 - stronger DBus/Wayland environment export for launched apps
-- TTY3/TTY4 session wrappers
+- example virtual-terminal session wrappers
 - parallax Matrix-style shader/config under [`parallax-hypr-drift/`](parallax-hypr-drift/)
+
+The `parallax-hypr-drift/` folder contains the custom config, shader, and
+launcher examples. The included TTY3/TTY4 scripts are local Linux console
+session examples: TTY means "virtual terminal" (`Ctrl+Alt+F3`,
+`Ctrl+Alt+F4`, etc). They can be copied or adapted for any login/session
+setup; they are not required if you launch DriftWM another way.
 
 The upstream DriftWM README continues below for base compositor details.
 
