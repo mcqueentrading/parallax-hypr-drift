@@ -1,5 +1,7 @@
 ## Parallax Hypr Drift Fork
 
+<h1 align="center"><img alt="Parallax Hypr Drift" src="assets/parallax/logo.png" width="420"></h1>
+
 This repo is an experimental DriftWM fork that blends DriftWM's infinite
 canvas with a Hyprland-inspired tiling workflow. It keeps upstream DriftWM as
 the base, then adds:
@@ -19,7 +21,7 @@ setup; they are not required if you launch DriftWM another way.
 
 The upstream DriftWM README continues below for base compositor details.
 
-<h1 align="center"><img alt="driftwm" src="assets/logo.jpg" width="500"></h1>
+<h1 align="center"><img alt="driftwm upstream logo" src="assets/logo.jpg" width="500"></h1>
 <p align="center">A trackpad-first infinite canvas Wayland compositor.</p>
 <p align="center">
     <a href="https://github.com/malbiruk/driftwm/blob/main/LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
