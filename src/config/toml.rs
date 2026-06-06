@@ -26,6 +26,8 @@ pub(super) struct ConfigFile {
     pub xwayland: XwaylandConfig,
     /// Placement mode for newly mapped windows: `"center"` (default) or `"cursor"`.
     pub window_placement: Option<String>,
+    /// Parallax fork workspace topology: `"grid"` (default) or `"cube-net"`.
+    pub workspace_layout: Option<String>,
     pub window_rules: Option<Vec<WindowRuleFile>>,
     pub outputs: Option<Vec<OutputRuleFile>>,
 }

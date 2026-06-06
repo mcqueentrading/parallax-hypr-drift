@@ -201,6 +201,7 @@ impl DriftWm {
         seat.add_pointer();
 
         let autostart = config.autostart.clone();
+        let workspace_layout = config.workspace_layout;
 
         let mut errors = BTreeMap::new();
         if let Some(msg) = config_error {
@@ -282,7 +283,7 @@ impl DriftWm {
             floating_windows: HashSet::new(),
             tile_rects: HashMap::new(),
             pending_tile_anchors: HashMap::new(),
-            workspaces: crate::state::workspace::default_workspaces(),
+            workspaces: crate::state::workspace::default_workspaces(workspace_layout),
             active_workspace: 1,
             focus_history: Vec::new(),
             cycle_state: None,

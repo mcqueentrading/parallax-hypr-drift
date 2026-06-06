@@ -131,6 +131,13 @@ pub enum WindowPlacement {
     Tile,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum WorkspaceLayout {
+    #[default]
+    Grid,
+    CubeNet,
+}
+
 impl ModKey {
     /// Base modifier pattern with only the WM mod key set.
     pub(crate) fn base(self) -> Modifiers {

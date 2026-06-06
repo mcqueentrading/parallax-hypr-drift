@@ -3,6 +3,7 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use std::collections::{HashMap, HashSet};
 
 use super::DriftWm;
+use driftwm::config::WorkspaceLayout;
 
 pub type WorkspaceId = u8;
 
@@ -27,30 +28,41 @@ impl WorkspaceState {
     }
 }
 
-pub fn default_workspaces() -> HashMap<WorkspaceId, WorkspaceState> {
+pub fn default_workspaces(layout: WorkspaceLayout) -> HashMap<WorkspaceId, WorkspaceState> {
     // Internal DriftWM canvas coordinates are Y-down. The six workspaces are
-    // laid out as a cube net on the infinite canvas:
+    // laid out as a flat grid by default:
+    //
+    //   1   2   3
+    //   4   5   6
+    //
+    // CubeNet is reserved for the later parallax projection:
     //
     //       4
     //   1   2   3   6
     //       5
     //
-    // 2 is the front face, 1/3 are left/right, 4/5 are above/below, and 6 is
-    // the back face. Keeping this topology now makes the later parallax/cube
-    // projection a mapping problem instead of a window migration problem.
-    //
     // This deliberately does not use the older user-facing `go-to` Y-up
     // convention, which negates Y before moving the camera.
     let step_x = WORKSPACE_WIDTH + WORKSPACE_GAP;
     let step_y = WORKSPACE_HEIGHT + WORKSPACE_GAP;
-    let origins = [
-        (1, 0, step_y),
-        (2, step_x, step_y),
-        (3, step_x * 2, step_y),
-        (4, step_x, 0),
-        (5, step_x, step_y * 2),
-        (6, step_x * 3, step_y),
-    ];
+    let origins = match layout {
+        WorkspaceLayout::Grid => [
+            (1, 0, 0),
+            (2, step_x, 0),
+            (3, step_x * 2, 0),
+            (4, 0, step_y),
+            (5, step_x, step_y),
+            (6, step_x * 2, step_y),
+        ],
+        WorkspaceLayout::CubeNet => [
+            (1, 0, step_y),
+            (2, step_x, step_y),
+            (3, step_x * 2, step_y),
+            (4, step_x, 0),
+            (5, step_x, step_y * 2),
+            (6, step_x * 3, step_y),
+        ],
+    };
 
     origins
         .into_iter()

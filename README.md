@@ -21,9 +21,11 @@ the public repo.
 
 The fork treats each numbered zone as a Hyprland-like workspace, but all six
 zones remain part of the same visible DriftWM canvas. The default topology is a
-cube-net layout: `2` is the front/center zone, `1` is left, `3` is right, `4`
-is above, `5` is below, and `6` is the back zone. New normal windows tile
-inside the active zone; `Mod+V` toggles the focused window into floating mode.
+flat grid (`1 2 3` over `4 5 6`) for normal desktop use. A future parallax mode
+can opt into `workspace_layout = "cube-net"`, where `2` is front/center, `1` is
+left, `3` is right, `4` is above, `5` is below, and `6` is the back zone. New
+normal windows tile inside the active zone; `Mod+V` toggles the focused window
+into floating mode.
 
 The upstream DriftWM README continues below for base compositor details.
 

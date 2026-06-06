@@ -102,6 +102,7 @@ pub struct Config {
     pub xwayland_enabled: bool,
     pub xwayland_path: String,
     pub window_placement: WindowPlacement,
+    pub workspace_layout: WorkspaceLayout,
     pub env: HashMap<String, String>,
     /// Pre-merged env passed to spawned child processes via `Command::envs()`.
     /// Layers (later wins): toolkit defaults → XCURSOR_* → user `[env]`. Built
@@ -276,6 +277,15 @@ impl Config {
             Some(other) => {
                 tracing::warn!("Unknown window_placement '{other}', using 'center'");
                 WindowPlacement::Center
+            }
+        };
+
+        let workspace_layout = match raw.workspace_layout.as_deref() {
+            Some("cube-net") | Some("cubenet") | Some("cube") => WorkspaceLayout::CubeNet,
+            Some("grid") | None => WorkspaceLayout::Grid,
+            Some(other) => {
+                tracing::warn!("Unknown workspace_layout '{other}', using 'grid'");
+                WorkspaceLayout::Grid
             }
         };
 
@@ -572,6 +582,7 @@ impl Config {
             xwayland_enabled: raw.xwayland.enabled,
             xwayland_path: expand_tilde(&raw.xwayland.path),
             window_placement,
+            workspace_layout,
             output_configs,
             bindings,
             mouse: mouse_bindings,
