@@ -118,6 +118,20 @@ impl DriftWm {
         self.workspace_at_point(pointer.current_location().to_i32_round::<i32>())
     }
 
+    pub fn in_workspace_perspective(&self) -> bool {
+        if self.zoom() < 0.95 {
+            return false;
+        }
+        let camera = self.camera();
+        let screen_center = self.usable_center_screen();
+        let zoom = self.zoom();
+        let center = Point::<i32, Logical>::from((
+            (camera.x + screen_center.x / zoom).round() as i32,
+            (camera.y + screen_center.y / zoom).round() as i32,
+        ));
+        self.workspace_at_point(center) == Some(self.active_workspace)
+    }
+
     pub fn move_window_to_workspace(&mut self, workspace_id: WorkspaceId) {
         let Some(window) = self.hovered_or_focused_window() else {
             return;
@@ -155,6 +169,9 @@ impl DriftWm {
     }
 
     pub fn reconcile_moved_tiled_window(&mut self, window: &Window) {
+        if !self.in_workspace_perspective() {
+            return;
+        }
         if !self.is_tiling_candidate(window) {
             return;
         }
@@ -294,6 +311,9 @@ impl DriftWm {
     }
 
     pub fn tile_windows(&mut self) {
+        if !self.in_workspace_perspective() {
+            return;
+        }
         self.sync_active_workspace_from_pointer();
         self.tile_workspace(self.active_workspace, true);
     }

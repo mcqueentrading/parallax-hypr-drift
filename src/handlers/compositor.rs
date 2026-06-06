@@ -418,8 +418,10 @@ impl CompositorHandler for DriftWm {
                         };
                         let activate = applied.as_ref().is_none_or(|a| !a.widget);
                         self.space.map_element(window.clone(), pos, activate);
-                        self.tile_windows();
-                        self.stabilize_tiled_workspace_view();
+                        if self.in_workspace_perspective() {
+                            self.tile_windows();
+                            self.stabilize_tiled_workspace_view();
+                        }
                     }
 
                     if let Some(toplevel) = window.toplevel() {
