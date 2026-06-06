@@ -1,7 +1,8 @@
 # Parallax Hypr Drift Config
 
-This folder contains the custom session setup for the Parallax Hypr Drift fork.
-It is meant as an example setup you can copy into your own Linux user config.
+This folder contains the public config assets for the Parallax Hypr Drift fork.
+It is intentionally generic: private machine paths, personal app shortcuts, and
+virtual-terminal login wiring should stay outside this Git repo.
 
 ## What This Adds
 
@@ -14,29 +15,12 @@ It is meant as an example setup you can copy into your own Linux user config.
 
 ## Files
 
-- `config.toml` - DriftWM config for the parallax session.
+- `config.toml` - public baseline DriftWM config for the parallax session.
 - `parallax_matrix_space.glsl` - custom background shader.
-- `parallax-hypr-drift-tty4-session` - example launcher for a separate test session.
-- `driftwm-tty3-session` - example launcher for a normal DriftWM session using this patched binary.
+- `start-parallax-hypr-drift` - generic launcher example.
 
-## What TTY3 And TTY4 Mean
-
-TTY means Linux virtual terminal. You switch between them with keys like:
-
-```text
-Ctrl+Alt+F1
-Ctrl+Alt+F2
-Ctrl+Alt+F3
-Ctrl+Alt+F4
-```
-
-In the original local setup:
-
-- TTY3 was used for a normal DriftWM session.
-- TTY4 was used for the experimental `parallax-hypr-drift` session.
-
-You do not have to use those exact terminals. They are just examples for
-keeping a stable session and an experimental session separate.
+Private local configs should use names like `config.private.toml` or
+`config.local.toml`; these are ignored by Git.
 
 ## Build
 
@@ -54,7 +38,7 @@ target/release/driftwm
 
 ## Example Install
 
-Copy the config somewhere stable:
+Copy the public config and shader:
 
 ```bash
 mkdir -p ~/.config/parallax-hypr-drift
@@ -62,41 +46,44 @@ cp parallax-hypr-drift/config.toml ~/.config/parallax-hypr-drift/config.toml
 cp parallax-hypr-drift/parallax_matrix_space.glsl ~/.config/parallax-hypr-drift/parallax_matrix_space.glsl
 ```
 
-Then update the shader path inside `config.toml` if your path is different.
+Edit this line in `~/.config/parallax-hypr-drift/config.toml`:
 
-Run it manually for testing:
+```toml
+path = "/home/YOUR_USER/.config/parallax-hypr-drift/parallax_matrix_space.glsl"
+```
+
+Replace `YOUR_USER` with your Linux username or use another absolute path.
+
+Run manually for testing:
 
 ```bash
 dbus-run-session ./target/release/driftwm --backend udev --config ~/.config/parallax-hypr-drift/config.toml
 ```
 
-## Keybinds In This Config
+Or copy the launcher:
 
-- `SUPER+Q` - open kitty.
-- `SUPER+S` / `SUPER+D` - open TLauncher through kitty.
+```bash
+mkdir -p ~/.local/bin
+cp parallax-hypr-drift/start-parallax-hypr-drift ~/.local/bin/start-parallax-hypr-drift
+chmod +x ~/.local/bin/start-parallax-hypr-drift
+```
+
+## Keybinds In The Public Config
+
+- `SUPER+Q` / `SUPER+Return` - open kitty.
 - `SUPER+C` - close focused window.
+- `SUPER+G` - open Google Chrome.
 - `SUPER+F` - toggle fullscreen.
 - `SUPER+V` - toggle focused window floating/tiled.
+- `SUPER+W` - zoom to fit all windows.
 - `SUPER+Left Click` - move floating window.
 - `SUPER+Right Click` - resize floating window.
 - `Print` / `SUPER+P` - full screenshot.
 - `SHIFT+Print` / `SUPER+SHIFT+P` - area screenshot.
 
-Screenshots in the local config save to:
+Screenshots save to:
 
 ```bash
-/home/unknown/Pictures
-```
-
-Change that path in `config.toml` for another user.
-
-## Local Development Paths
-
-These are the original local paths used while developing this fork:
-
-```bash
-/home/unknown/Documents/scripts/projectcampaign/driftwm-src
-/home/unknown/Documents/scripts/projectcampaign/parrlax-hypr-drift/config.toml
-/home/unknown/.local/bin/parrlax-hypr-drift-tty4-session
+$HOME/Pictures
 ```
 

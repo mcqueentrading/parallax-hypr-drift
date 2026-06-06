@@ -10,14 +10,12 @@ the base, then adds:
 - `toggle-floating` window action
 - focus-follows-cursor support enabled in the parallax config
 - stronger DBus/Wayland environment export for launched apps
-- example virtual-terminal session wrappers
+- generic launcher/config examples
 - parallax Matrix-style shader/config under [`parallax-hypr-drift/`](parallax-hypr-drift/)
 
 The `parallax-hypr-drift/` folder contains the custom config, shader, and
-launcher examples. The included TTY3/TTY4 scripts are local Linux console
-session examples: TTY means "virtual terminal" (`Ctrl+Alt+F3`,
-`Ctrl+Alt+F4`, etc). They can be copied or adapted for any login/session
-setup; they are not required if you launch DriftWM another way.
+launcher example. Private machine-specific session wiring should stay outside
+the public repo.
 
 The upstream DriftWM README continues below for base compositor details.
 

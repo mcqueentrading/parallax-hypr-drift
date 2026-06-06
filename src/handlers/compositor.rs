@@ -423,6 +423,7 @@ impl CompositorHandler for DriftWm {
                             driftwm::config::WindowPlacement::Tile
                         ) {
                             self.tile_windows();
+                            self.stabilize_tiled_workspace_view();
                         }
                     }
 
@@ -509,7 +510,14 @@ impl CompositorHandler for DriftWm {
                         // /focus — skip navigate_to_window then.
                         let deferred_fit_or_fs = self.pending_fit.contains(&root)
                             || self.pending_fullscreen.contains(&root);
-                        if !is_widget && !is_fullscreen && !deferred_fit_or_fs {
+                        if !is_widget
+                            && !is_fullscreen
+                            && !deferred_fit_or_fs
+                            && !matches!(
+                                self.config.window_placement,
+                                driftwm::config::WindowPlacement::Tile
+                            )
+                        {
                             let reset = self.config.zoom_reset_on_new_window;
                             // Cursor mode is "stay put" by default; only
                             // override in the overview-rescue case (user is

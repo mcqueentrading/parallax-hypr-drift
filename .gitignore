@@ -4,5 +4,8 @@ __pycache__
 .venv
 .ruff_cache
 *.tar.gz
+parallax-hypr-drift/*.private.toml
+parallax-hypr-drift/*.local.toml
+parallax-hypr-drift/*.secret.md
 # nix build output symlink
 result

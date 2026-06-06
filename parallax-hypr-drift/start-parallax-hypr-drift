@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Public launcher example for the Parallax Hypr Drift session.
+# Copy this somewhere in PATH and adjust CONFIG/DRIFTWM_BIN for your machine.
+
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=parallax-hypr-drift
+export XDG_CURRENT_DESKTOP=driftwm
+export XDG_DESKTOP_SESSION=parallax-hypr-drift
+export MOZ_ENABLE_WAYLAND=1
+export QT_QPA_PLATFORM=wayland
+export SDL_VIDEODRIVER=wayland
+export GDK_BACKEND=wayland,x11
+export ELECTRON_OZONE_PLATFORM_HINT=wayland
+export NIXOS_OZONE_WL=1
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/parallax-hypr-drift/config.toml"
+DRIFTWM_BIN="${DRIFTWM_BIN:-$(pwd)/target/release/driftwm}"
+
+unset DISPLAY || true
+unset WAYLAND_DISPLAY || true
+
+exec dbus-run-session env -u DISPLAY -u WAYLAND_DISPLAY "$DRIFTWM_BIN" --backend udev --config "$CONFIG"

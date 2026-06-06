@@ -1,5 +1,5 @@
-# parrlax-hypr-drift: TTY4 experimental DriftWM config.
-# Synced from TTY3 normal DriftWM, with parallax background and no title bars.
+# Public Parallax Hypr Drift config.
+# Copy to ~/.config/parallax-hypr-drift/config.toml and adjust paths/apps.
 
 mod_key = "super"
 window_placement = "tile"
@@ -16,7 +16,7 @@ pan_step = 140.0
 [zoom]
 step = 1.12
 fit_padding = 90.0
-reset_on_new_window = true
+reset_on_new_window = false
 reset_on_activation = true
 
 [snap]
@@ -29,23 +29,19 @@ edge_center = true
 
 [background]
 type = "shader"
-path = "/home/unknown/Documents/scripts/projectcampaign/parrlax-hypr-drift/parallax_matrix_space.glsl"
+# Update this path after copying the shader to your config directory.
+path = "/home/YOUR_USER/.config/parallax-hypr-drift/parallax_matrix_space.glsl"
 
 [decorations]
 default_mode = "minimal"
 
 [keybindings]
-"mod+s" = "exec kitty -e bash -c 'tlauncher || bash'"
-"mod+d" = "exec kitty -e bash -c 'tlauncher || bash'"
 "mod+return" = "exec kitty"
 "mod+q" = "exec kitty"
 "mod+c" = "close-window"
 "mod+g" = "exec google-chrome-stable"
-"mod+shift+c" = "exec kitty -e bash -lc 'codex || codexrun || bash'"
 "mod+f" = "toggle-fullscreen"
 "mod+v" = "toggle-floating"
-"mod+u" = "spawn /home/unknown/.local/bin/driftwm-matrix-wallpaper"
-"mod+n" = "spawn pkill mpvpaper"
 "mod+w" = "zoom-to-fit"
 "mod+equal" = "zoom-in"
 "mod+minus" = "zoom-out"

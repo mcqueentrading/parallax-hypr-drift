@@ -76,6 +76,16 @@ impl DriftWm {
         )
     }
 
+    pub fn stabilize_tiled_workspace_view(&mut self) {
+        self.set_camera_target(None);
+        self.set_zoom_target(None);
+        self.set_zoom_animation_center(None);
+        if (self.zoom() - 1.0).abs() > 1e-9 {
+            self.set_zoom(1.0);
+            self.update_output_from_camera();
+        }
+    }
+
     fn split_rect(
         rect: Rectangle<i32, Logical>,
         gap: i32,
