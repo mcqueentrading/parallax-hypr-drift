@@ -154,6 +154,37 @@ impl DriftWm {
         self.stabilize_tiled_workspace_view();
     }
 
+    pub fn reconcile_moved_tiled_window(&mut self, window: &Window) {
+        if !self.is_tiling_candidate(window) {
+            return;
+        }
+        let Some(id) = Self::window_object_id(window) else {
+            return;
+        };
+        if self.floating_windows.contains(&id) {
+            return;
+        }
+
+        let source_workspace = self.workspace_for_window_id(&id);
+        let target_workspace = self
+            .workspace_for_window(window)
+            .or(source_workspace)
+            .unwrap_or(self.active_workspace);
+
+        if source_workspace != Some(target_workspace) {
+            self.assign_window_to_workspace(id, target_workspace);
+        }
+
+        if let Some(source_workspace) = source_workspace
+            && source_workspace != target_workspace
+        {
+            self.tile_workspace(source_workspace, false);
+        }
+        self.active_workspace = target_workspace;
+        self.tile_workspace(target_workspace, false);
+        self.stabilize_tiled_workspace_view();
+    }
+
     fn workspace_tile_area(&self, workspace_id: WorkspaceId) -> Rectangle<i32, Logical> {
         let workspace = self
             .workspaces

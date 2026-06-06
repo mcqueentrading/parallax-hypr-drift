@@ -440,6 +440,17 @@ impl PointerGrab<DriftWm> for MoveSurfaceGrab {
                     data.refresh_stable_snap_rect(member);
                 }
             }
+            let mut moved_windows = Vec::with_capacity(self.cluster_members.len() + 1);
+            moved_windows.push(self.window.clone());
+            moved_windows.extend(
+                self.cluster_members
+                    .iter()
+                    .filter(|(member, _)| member.alive())
+                    .map(|(member, _)| member.clone()),
+            );
+            for window in moved_windows {
+                data.reconcile_moved_tiled_window(&window);
+            }
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
