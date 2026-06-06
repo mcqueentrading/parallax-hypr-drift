@@ -418,6 +418,12 @@ impl CompositorHandler for DriftWm {
                         };
                         let activate = applied.as_ref().is_none_or(|a| !a.widget);
                         self.space.map_element(window.clone(), pos, activate);
+                        if matches!(
+                            self.config.window_placement,
+                            driftwm::config::WindowPlacement::Tile
+                        ) {
+                            self.tile_windows();
+                        }
                     }
 
                     if let Some(toplevel) = window.toplevel() {

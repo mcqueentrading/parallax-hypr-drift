@@ -369,6 +369,9 @@ impl DriftWm {
                     self.toggle_fit_window_snapped(&window);
                 }
             }
+            Action::ToggleFloating => {
+                self.toggle_floating_window();
+            }
             Action::SendToOutput(dir) => {
                 if let Some(window) = self.focused_window().filter(|w| !w.is_widget())
                     && let Some(from_output) = self.output_for_window(&window)

@@ -160,25 +160,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Command::env() rather than relying on process env — the policy is "don't
     // touch process env at runtime", so the shell-out gets only what we hand it.
     {
-        let session_vars = [
-            ("WAYLAND_DISPLAY", socket_name.as_str()),
-            ("XDG_CURRENT_DESKTOP", "driftwm"),
-            ("XDG_SESSION_TYPE", "wayland"),
-            ("XDG_SESSION_DESKTOP", "driftwm"),
+        let mut session_vars = vec![
+            ("WAYLAND_DISPLAY".to_string(), socket_name.clone()),
+            ("XDG_CURRENT_DESKTOP".to_string(), "driftwm".to_string()),
+            ("XDG_SESSION_TYPE".to_string(), "wayland".to_string()),
+            ("XDG_SESSION_DESKTOP".to_string(), "driftwm".to_string()),
+            ("XDG_SESSION_CLASS".to_string(), "user".to_string()),
         ];
+        for name in ["DBUS_SESSION_BUS_ADDRESS", "PATH", "HOME", "XDG_RUNTIME_DIR"] {
+            if let Ok(value) = std::env::var(name) {
+                session_vars.push((name.to_string(), value));
+            }
+        }
         let names = session_vars
             .iter()
-            .map(|(k, _)| *k)
+            .map(|(k, _)| k.as_str())
             .collect::<Vec<_>>()
             .join(" ");
         let cmd = format!(
             "systemctl --user import-environment {names}; \
              hash dbus-update-activation-environment 2>/dev/null && \
-             dbus-update-activation-environment {names}"
+             dbus-update-activation-environment --systemd {names}"
         );
         match std::process::Command::new("/bin/sh")
             .args(["-c", &cmd])
-            .envs(session_vars.iter().copied())
+            .envs(session_vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .spawn()
         {
             Ok(mut child) => {

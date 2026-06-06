@@ -279,6 +279,7 @@ impl DriftWm {
             auto_anchor_snapshot: HashMap::new(),
             pending_recenter: HashMap::new(),
             stable_snap_rects: HashMap::new(),
+            floating_windows: HashSet::new(),
             focus_history: Vec::new(),
             cycle_state: None,
             held_action: None,

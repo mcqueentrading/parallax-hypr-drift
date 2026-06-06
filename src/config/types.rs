@@ -57,6 +57,7 @@ pub enum Action {
     ToggleFullscreen,
     FitWindow,
     FitWindowSnapped,
+    ToggleFloating,
     SendToOutput(Direction),
     FocusCenter,
     ReloadConfig,
@@ -124,6 +125,9 @@ pub enum WindowPlacement {
     /// edges (CW from viewport-nearest), then BFS to neighbors. Falls back
     /// to `Center` when no focused window or no valid placement was found.
     Auto,
+    /// Force normal top-level windows into a simple viewport grid. Windows
+    /// toggled floating are excluded from the grid.
+    Tile,
 }
 
 impl ModKey {

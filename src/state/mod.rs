@@ -10,6 +10,7 @@ mod navigation;
 pub mod persistence;
 mod reload;
 mod render_cache;
+mod tile;
 pub use cluster_snapshot::ClusterResizeSnapshot;
 pub(crate) use cluster_snapshot::snap_targets_impl;
 pub use cursor::{CursorFrames, CursorState};
@@ -437,6 +438,8 @@ pub struct DriftWm {
         smithay::reexports::wayland_server::backend::ObjectId,
         driftwm::layout::snap::SnapRect,
     >,
+    /// Windows removed from the forced tiling grid by `toggle-floating`.
+    pub floating_windows: HashSet<smithay::reexports::wayland_server::backend::ObjectId>,
 
     pub focus_history: Vec<Window>,
     pub cycle_state: Option<usize>,
