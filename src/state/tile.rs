@@ -11,6 +11,16 @@ impl DriftWm {
         window.wl_surface().map(|surface| surface.id())
     }
 
+    fn purge_workspace_tile_state(&mut self, id: &ObjectId, remove_membership: bool) {
+        self.tile_rects.remove(id);
+        for workspace in self.workspaces.values_mut() {
+            workspace.tile_rects.remove(id);
+            if remove_membership {
+                workspace.windows.remove(id);
+            }
+        }
+    }
+
     fn is_tiling_candidate(&self, window: &Window) -> bool {
         if window.is_widget() || window.parent_surface().is_some() || window.is_modal() {
             return false;
@@ -31,13 +41,18 @@ impl DriftWm {
         };
 
         if self.floating_windows.remove(&id) {
+            // Hyprland-style transition: toggling back to tiled reinserts the
+            // window into the layout tree, rather than reusing stale geometry.
+            self.purge_workspace_tile_state(&id, true);
             self.tile_windows();
+            self.stabilize_tiled_workspace_view();
         } else {
             self.floating_windows.insert(id.clone());
-            self.tile_rects.remove(&id);
-            for workspace in self.workspaces.values_mut() {
-                workspace.tile_rects.remove(&id);
-            }
+            // Remove it from the tiled membership so remaining windows expand.
+            self.purge_workspace_tile_state(&id, true);
+            self.tile_windows();
+            self.stabilize_tiled_workspace_view();
+
             let usable = self.get_usable_area();
             let camera = self.camera().to_i32_round::<i32>();
             let width = (usable.size.w as f64 * 0.55).round() as i32;
@@ -217,7 +232,7 @@ impl DriftWm {
             }
         }
 
-        let active_window_ids: Vec<ObjectId> = self
+        let active_window_ids_unordered: Vec<ObjectId> = self
             .workspaces
             .get(&active_workspace)
             .map(|workspace| workspace.windows.iter().cloned().collect())
@@ -226,26 +241,26 @@ impl DriftWm {
             .into_iter()
             .filter(|window| {
                 Self::window_object_id(window)
-                    .is_some_and(|id| active_window_ids.iter().any(|active_id| active_id == &id))
+                    .is_some_and(|id| {
+                        active_window_ids_unordered
+                            .iter()
+                            .any(|active_id| active_id == &id)
+                    })
             })
             .collect();
         if windows.is_empty() {
             return;
         }
 
+        let active_window_ids: Vec<ObjectId> =
+            windows.iter().filter_map(Self::window_object_id).collect();
         let full_area = self.current_tile_area();
         let gap = self.config.snap_gap.max(0.0).round() as i32;
-        let active_tile_rects = self
-            .workspaces
-            .get(&active_workspace)
-            .map(|workspace| workspace.tile_rects.clone())
-            .unwrap_or_default();
-        let mut next_tile_rects = active_tile_rects;
-        let new_ids: Vec<ObjectId> = active_window_ids
-            .iter()
-            .filter(|id| !next_tile_rects.contains_key(id))
-            .cloned()
-            .collect();
+        // Rebuild the active workspace tree from current tiled membership.
+        // This mirrors Hyprland's remove/reinsert/recalculate behavior and
+        // guarantees the remaining windows expand after a float toggle.
+        let mut next_tile_rects = std::collections::HashMap::new();
+        let new_ids = active_window_ids;
 
         for new_id in new_ids {
             if next_tile_rects.is_empty() {
