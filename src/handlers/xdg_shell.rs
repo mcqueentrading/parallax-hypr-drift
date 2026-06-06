@@ -353,6 +353,7 @@ impl XdgShellHandler for DriftWm {
             }
             // Remove from focus history before unmapping
             self.focus_history.retain(|w| w != window);
+            let old_workspace = self.prepare_tiled_window_unmap(&wl_surface.id());
             // Clamp or clear cycle index if cycling is active
             if self.cycle_state.is_some() {
                 if self.focus_history.is_empty() {
@@ -362,6 +363,7 @@ impl XdgShellHandler for DriftWm {
                 }
             }
             self.space.unmap_elem(window);
+            self.retile_after_window_unmap(old_workspace);
             // The window may have sat under the cursor; re-target pointer focus
             // now that it's gone so clicks don't fall into the destroyed surface.
             self.refresh_pointer_focus();

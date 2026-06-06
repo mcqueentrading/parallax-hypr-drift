@@ -202,6 +202,24 @@ impl DriftWm {
         self.stabilize_tiled_workspace_view();
     }
 
+    pub fn prepare_tiled_window_unmap(&mut self, id: &ObjectId) -> Option<WorkspaceId> {
+        self.floating_windows.remove(id);
+        let source_workspace = self.workspace_for_window_id(id);
+        self.purge_workspace_tile_state(id, true);
+        source_workspace
+    }
+
+    pub fn retile_after_window_unmap(&mut self, source_workspace: Option<WorkspaceId>) {
+        let Some(workspace_id) = source_workspace else {
+            return;
+        };
+
+        self.tile_workspace(workspace_id, false);
+        if self.in_workspace_perspective() && workspace_id == self.active_workspace {
+            self.stabilize_tiled_workspace_view();
+        }
+    }
+
     fn workspace_tile_area(&self, workspace_id: WorkspaceId) -> Rectangle<i32, Logical> {
         let workspace = self
             .workspaces
