@@ -82,10 +82,20 @@ impl DriftWm {
         self.set_camera_target(None);
         self.set_zoom_target(None);
         self.set_zoom_animation_center(None);
+        self.set_overview_return(None);
         if (self.zoom() - 1.0).abs() > 1e-9 {
             self.set_zoom(1.0);
-            self.update_output_from_camera();
         }
+        let workspace = self.active_workspace_rect();
+        let vc = self.usable_center_screen();
+        let zoom = self.zoom();
+        let center = Point::<f64, Logical>::from((
+            workspace.loc.x as f64 + workspace.size.w as f64 / 2.0,
+            workspace.loc.y as f64 + workspace.size.h as f64 / 2.0,
+        ));
+        let camera = Point::from((center.x - vc.x / zoom, center.y - vc.y / zoom));
+        self.set_camera(camera);
+        self.update_output_from_camera();
     }
 
     fn split_rect(
