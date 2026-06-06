@@ -34,6 +34,14 @@ impl DriftWm {
         }
     }
 
+    fn workspace_for_window_id(&self, id: &ObjectId) -> Option<WorkspaceId> {
+        self.workspaces
+            .iter()
+            .find_map(|(&workspace_id, workspace)| {
+                workspace.windows.contains(id).then_some(workspace_id)
+            })
+    }
+
     fn is_tiling_candidate(&self, window: &Window) -> bool {
         if window.is_widget() || window.parent_surface().is_some() || window.is_modal() {
             return false;
@@ -41,8 +49,7 @@ impl DriftWm {
         if self.fullscreen.values().any(|fs| fs.window == *window) {
             return false;
         }
-        Self::window_object_id(window)
-            .is_some_and(|id| !self.floating_windows.contains(&id))
+        Self::window_object_id(window).is_some_and(|id| !self.floating_windows.contains(&id))
     }
 
     pub fn toggle_floating_window(&mut self) {
@@ -63,13 +70,18 @@ impl DriftWm {
             self.purge_workspace_tile_state(&id, true);
             self.assign_window_to_workspace(id.clone(), workspace);
             self.active_workspace = workspace;
-            self.tile_windows();
+            self.tile_workspace(workspace, false);
             self.stabilize_tiled_workspace_view();
         } else {
             self.floating_windows.insert(id.clone());
+            let source_workspace = self
+                .workspace_for_window_id(&id)
+                .or_else(|| self.workspace_for_window(&window))
+                .unwrap_or(self.active_workspace);
             // Remove it from the tiled membership so remaining windows expand.
             self.purge_workspace_tile_state(&id, true);
-            self.tile_windows();
+            self.tile_workspace(source_workspace, false);
+            self.active_workspace = source_workspace;
             self.stabilize_tiled_workspace_view();
 
             let usable = self.get_usable_area();
@@ -92,10 +104,11 @@ impl DriftWm {
             self.space.map_element(window.clone(), loc, true);
             if let Some(surface) = window.wl_surface() {
                 let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                self.seat
-                    .get_keyboard()
-                    .unwrap()
-                    .set_focus(self, Some(FocusTarget(surface.into_owned())), serial);
+                self.seat.get_keyboard().unwrap().set_focus(
+                    self,
+                    Some(FocusTarget(surface.into_owned())),
+                    serial,
+                );
             }
         }
     }
@@ -116,6 +129,9 @@ impl DriftWm {
             tracing::warn!("requested missing workspace {workspace_id}");
             return;
         };
+        let source_workspace = self
+            .workspace_for_window_id(&id)
+            .or_else(|| self.workspace_for_window(&window));
 
         self.floating_windows.remove(&id);
         self.purge_workspace_tile_state(&id, true);
@@ -129,12 +145,22 @@ impl DriftWm {
             workspace_rect.loc.y + self.config.snap_gap.round() as i32,
         ));
         self.space.map_element(window, loc, true);
-        self.tile_windows();
+        if let Some(source_workspace) = source_workspace
+            && source_workspace != workspace_id
+        {
+            self.tile_workspace(source_workspace, false);
+        }
+        self.tile_workspace(workspace_id, false);
         self.stabilize_tiled_workspace_view();
     }
 
-    fn current_tile_area(&self) -> Rectangle<i32, Logical> {
-        let workspace = self.active_workspace_rect();
+    fn workspace_tile_area(&self, workspace_id: WorkspaceId) -> Rectangle<i32, Logical> {
+        let workspace = self
+            .workspaces
+            .get(&workspace_id)
+            .or_else(|| self.workspaces.get(&1))
+            .map(|workspace| workspace.rect)
+            .unwrap_or_else(|| Rectangle::new(Point::from((0, 0)), Size::from((1920, 1080))));
         let gap = self.config.snap_gap.max(0.0).round() as i32;
         Rectangle::new(
             Point::from((workspace.loc.x + gap, workspace.loc.y + gap)),
@@ -238,7 +264,10 @@ impl DriftWm {
 
     pub fn tile_windows(&mut self) {
         self.sync_active_workspace_from_pointer();
+        self.tile_workspace(self.active_workspace, true);
+    }
 
+    fn tile_workspace(&mut self, workspace_id: WorkspaceId, assign_unassigned: bool) {
         self.floating_windows.retain(|id| {
             self.space
                 .elements()
@@ -253,15 +282,15 @@ impl DriftWm {
             .collect();
         let count = windows.len();
         if count == 0 {
+            if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
+                workspace.windows.clear();
+                workspace.tile_rects.clear();
+            }
             return;
         }
 
-        let all_window_ids: Vec<ObjectId> = windows
-            .iter()
-            .filter_map(Self::window_object_id)
-            .collect();
-        let active_workspace = self.active_workspace;
-
+        let all_window_ids: Vec<ObjectId> =
+            windows.iter().filter_map(Self::window_object_id).collect();
         for workspace in self.workspaces.values_mut() {
             workspace
                 .windows
@@ -276,7 +305,7 @@ impl DriftWm {
             .values()
             .flat_map(|workspace| workspace.windows.iter().cloned())
             .collect();
-        if let Some(workspace) = self.workspaces.get_mut(&active_workspace) {
+        if assign_unassigned && let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
             for id in &all_window_ids {
                 if !assigned_ids.iter().any(|assigned| assigned == id) {
                     workspace.windows.insert(id.clone());
@@ -286,27 +315,29 @@ impl DriftWm {
 
         let active_window_ids_unordered: Vec<ObjectId> = self
             .workspaces
-            .get(&active_workspace)
+            .get(&workspace_id)
             .map(|workspace| workspace.windows.iter().cloned().collect())
             .unwrap_or_default();
         let windows: Vec<Window> = windows
             .into_iter()
             .filter(|window| {
-                Self::window_object_id(window)
-                    .is_some_and(|id| {
-                        active_window_ids_unordered
-                            .iter()
-                            .any(|active_id| active_id == &id)
-                    })
+                Self::window_object_id(window).is_some_and(|id| {
+                    active_window_ids_unordered
+                        .iter()
+                        .any(|active_id| active_id == &id)
+                })
             })
             .collect();
         if windows.is_empty() {
+            if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
+                workspace.tile_rects.clear();
+            }
             return;
         }
 
         let active_window_ids: Vec<ObjectId> =
             windows.iter().filter_map(Self::window_object_id).collect();
-        let full_area = self.current_tile_area();
+        let full_area = self.workspace_tile_area(workspace_id);
         let gap = self.config.snap_gap.max(0.0).round() as i32;
         // Rebuild the active workspace tree from current tiled membership.
         // This mirrors Hyprland's remove/reinsert/recalculate behavior and
@@ -342,7 +373,7 @@ impl DriftWm {
             next_tile_rects.insert(new_id, new_rect);
         }
 
-        if let Some(workspace) = self.workspaces.get_mut(&active_workspace) {
+        if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
             workspace.tile_rects = next_tile_rects.clone();
         }
 

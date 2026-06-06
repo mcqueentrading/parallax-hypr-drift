@@ -443,10 +443,8 @@ pub struct DriftWm {
     /// Windows removed from the forced tiling grid by `toggle-floating`.
     pub floating_windows: HashSet<smithay::reexports::wayland_server::backend::ObjectId>,
     /// Dwindle-style tile rectangles for forced tiling mode.
-    pub tile_rects: HashMap<
-        smithay::reexports::wayland_server::backend::ObjectId,
-        Rectangle<i32, Logical>,
-    >,
+    pub tile_rects:
+        HashMap<smithay::reexports::wayland_server::backend::ObjectId, Rectangle<i32, Logical>>,
     /// New-window -> existing-window anchor captured before the new surface is mapped.
     pub pending_tile_anchors: HashMap<
         smithay::reexports::wayland_server::backend::ObjectId,

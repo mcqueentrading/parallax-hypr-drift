@@ -1,5 +1,5 @@
-use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::desktop::Window;
+use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 use std::collections::{HashMap, HashSet};
 

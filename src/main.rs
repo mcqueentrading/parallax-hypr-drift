@@ -161,7 +161,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("XDG_DESKTOP_SESSION", "driftwm"),
         ("XDG_SESSION_CLASS", "user"),
     ] {
-        data.config.child_env.insert(key.to_string(), value.to_string());
+        data.config
+            .child_env
+            .insert(key.to_string(), value.to_string());
     }
 
     // Export only session-level vars to systemd and D-Bus. Pass them through
