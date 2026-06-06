@@ -50,6 +50,7 @@ pub enum Action {
     HomeToggle,
     GoToPosition(f64, f64),
     GoToWorkspace(u8),
+    MoveWindowToWorkspace(u8),
     ZoomIn,
     ZoomOut,
     ZoomReset,

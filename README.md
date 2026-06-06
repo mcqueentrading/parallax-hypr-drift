@@ -8,6 +8,7 @@ the base, then adds:
 
 - Hyprland-style split placement for new tiled windows
 - six visible workspace zones on one infinite canvas (`Mod+1` through `Mod+6`)
+- Hyprland-style send hovered/focused window to zone (`Mod+Shift+1` through `Mod+Shift+6`)
 - mandatory workspace-bounded tiling for normal windows
 - `toggle-floating` window action
 - focus-follows-cursor support enabled in the parallax config
@@ -25,7 +26,8 @@ flat grid (`1 2 3` over `4 5 6`) for normal desktop use. A future parallax mode
 can opt into `workspace_layout = "cube-net"`, where `2` is front/center, `1` is
 left, `3` is right, `4` is above, `5` is below, and `6` is the back zone. New
 normal windows tile inside the active zone; `Mod+V` toggles the focused window
-into floating mode.
+into floating mode. `Mod+Shift+1..6` sends the hovered or focused window into
+that zone and retiles it with the windows already there.
 
 The upstream DriftWM README continues below for base compositor details.
 

@@ -1,4 +1,5 @@
 use smithay::reexports::wayland_server::backend::ObjectId;
+use smithay::desktop::Window;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 use std::collections::{HashMap, HashSet};
 
@@ -117,6 +118,23 @@ impl DriftWm {
             .or_else(|| self.workspaces.get(&1))
             .map(|workspace| workspace.rect)
             .unwrap_or_else(|| Rectangle::new(Point::from((0, 0)), Size::from((1920, 1080))))
+    }
+
+    pub fn workspace_for_window(&self, window: &Window) -> Option<WorkspaceId> {
+        let loc = self.space.element_location(window)?;
+        let size = window.geometry().size;
+        let center = Point::<i32, Logical>::from((loc.x + size.w / 2, loc.y + size.h / 2));
+        self.workspace_at_point(center)
+    }
+
+    pub fn assign_window_to_workspace(&mut self, id: ObjectId, workspace_id: WorkspaceId) {
+        for workspace in self.workspaces.values_mut() {
+            workspace.windows.remove(&id);
+            workspace.tile_rects.remove(&id);
+        }
+        if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
+            workspace.windows.insert(id);
+        }
     }
 
     pub fn activate_workspace(&mut self, id: WorkspaceId) {

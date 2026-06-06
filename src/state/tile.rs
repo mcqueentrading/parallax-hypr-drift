@@ -4,11 +4,24 @@ use smithay::reexports::wayland_server::{Resource, backend::ObjectId};
 use smithay::utils::{Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 
-use super::{DriftWm, FocusTarget};
+use super::{DriftWm, FocusTarget, WorkspaceId};
 
 impl DriftWm {
     fn window_object_id(window: &Window) -> Option<ObjectId> {
         window.wl_surface().map(|surface| surface.id())
+    }
+
+    fn hovered_or_focused_window(&self) -> Option<Window> {
+        if let Some(pointer) = self.seat.get_pointer() {
+            let pos = pointer.current_location();
+            if let Some((window, _)) = self.space.element_under(pos) {
+                let window = window.clone();
+                if !window.is_widget() {
+                    return Some(window);
+                }
+            }
+        }
+        self.focused_window().filter(|w| !w.is_widget())
     }
 
     fn purge_workspace_tile_state(&mut self, id: &ObjectId, remove_membership: bool) {
@@ -43,7 +56,13 @@ impl DriftWm {
         if self.floating_windows.remove(&id) {
             // Hyprland-style transition: toggling back to tiled reinserts the
             // window into the layout tree, rather than reusing stale geometry.
+            let workspace = self
+                .workspace_for_window(&window)
+                .or_else(|| self.workspace_at_pointer())
+                .unwrap_or(self.active_workspace);
             self.purge_workspace_tile_state(&id, true);
+            self.assign_window_to_workspace(id.clone(), workspace);
+            self.active_workspace = workspace;
             self.tile_windows();
             self.stabilize_tiled_workspace_view();
         } else {
@@ -79,6 +98,39 @@ impl DriftWm {
                     .set_focus(self, Some(FocusTarget(surface.into_owned())), serial);
             }
         }
+    }
+
+    pub fn workspace_at_pointer(&self) -> Option<WorkspaceId> {
+        let pointer = self.seat.get_pointer()?;
+        self.workspace_at_point(pointer.current_location().to_i32_round::<i32>())
+    }
+
+    pub fn move_window_to_workspace(&mut self, workspace_id: WorkspaceId) {
+        let Some(window) = self.hovered_or_focused_window() else {
+            return;
+        };
+        let Some(id) = Self::window_object_id(&window) else {
+            return;
+        };
+        let Some(workspace_rect) = self.workspaces.get(&workspace_id).map(|w| w.rect) else {
+            tracing::warn!("requested missing workspace {workspace_id}");
+            return;
+        };
+
+        self.floating_windows.remove(&id);
+        self.purge_workspace_tile_state(&id, true);
+        self.assign_window_to_workspace(id, workspace_id);
+        self.active_workspace = workspace_id;
+
+        // Put it inside the target zone before tiling so clients that inspect
+        // initial position see the same workspace they are about to join.
+        let loc = Point::<i32, Logical>::from((
+            workspace_rect.loc.x + self.config.snap_gap.round() as i32,
+            workspace_rect.loc.y + self.config.snap_gap.round() as i32,
+        ));
+        self.space.map_element(window, loc, true);
+        self.tile_windows();
+        self.stabilize_tiled_workspace_view();
     }
 
     fn current_tile_area(&self) -> Rectangle<i32, Logical> {

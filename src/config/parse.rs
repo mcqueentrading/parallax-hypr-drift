@@ -134,6 +134,17 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
             }
             Ok(Action::GoToWorkspace(id))
         }
+        "move-to-workspace" | "move-window-to-workspace" => {
+            let arg = arg.ok_or("move-to-workspace requires an id: move-to-workspace <1-6>")?;
+            let id: u8 = arg
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid workspace id: {}", arg.trim()))?;
+            if !(1..=6).contains(&id) {
+                return Err(format!("workspace id must be 1-6, got {id}"));
+            }
+            Ok(Action::MoveWindowToWorkspace(id))
+        }
         "zoom-in" => Ok(Action::ZoomIn),
         "zoom-out" => Ok(Action::ZoomOut),
         "zoom-reset" => Ok(Action::ZoomReset),

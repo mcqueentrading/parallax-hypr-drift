@@ -155,6 +155,48 @@ pub(super) fn default_bindings(
         ),
         (
             KeyCombo {
+                modifiers: m_shift.clone(),
+                sym: Keysym::from(keysyms::KEY_1),
+            },
+            Action::MoveWindowToWorkspace(1),
+        ),
+        (
+            KeyCombo {
+                modifiers: m_shift.clone(),
+                sym: Keysym::from(keysyms::KEY_2),
+            },
+            Action::MoveWindowToWorkspace(2),
+        ),
+        (
+            KeyCombo {
+                modifiers: m_shift.clone(),
+                sym: Keysym::from(keysyms::KEY_3),
+            },
+            Action::MoveWindowToWorkspace(3),
+        ),
+        (
+            KeyCombo {
+                modifiers: m_shift.clone(),
+                sym: Keysym::from(keysyms::KEY_4),
+            },
+            Action::MoveWindowToWorkspace(4),
+        ),
+        (
+            KeyCombo {
+                modifiers: m_shift.clone(),
+                sym: Keysym::from(keysyms::KEY_5),
+            },
+            Action::MoveWindowToWorkspace(5),
+        ),
+        (
+            KeyCombo {
+                modifiers: m_shift.clone(),
+                sym: Keysym::from(keysyms::KEY_6),
+            },
+            Action::MoveWindowToWorkspace(6),
+        ),
+        (
+            KeyCombo {
                 modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_c),
             },
