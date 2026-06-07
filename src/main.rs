@@ -1,5 +1,6 @@
 mod backend;
 mod decorations;
+mod diagnostics;
 mod grabs;
 mod handlers;
 mod input;
@@ -11,6 +12,7 @@ mod state;
 mod surface_tree;
 mod xwayland;
 
+use driftwm::window_ext::WindowExt;
 use state::{ClientState, DriftWm};
 use std::sync::Arc;
 
@@ -40,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    diagnostics::log("startup: driftwm diagnostics online log=/tmp/parallax-hypr-drift.log");
 
     if std::env::args().any(|a| a == "--help" || a == "-h") {
         println!(
@@ -289,7 +292,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tracing::info!("Starting event loop — launch apps with: WAYLAND_DISPLAY={socket_name} <app>");
+    diagnostics::log(format!(
+        "event_loop:start backend={} wayland_display={}",
+        backend_name, socket_name
+    ));
     event_loop.run(None, &mut data, |data| {
+        diagnostics::heartbeat(|| {
+            let windows = data.space.elements().filter(|w| !w.is_widget()).count();
+            let camera = data.camera();
+            format!(
+                "heartbeat windows={} active_ws={} zoom={:.3} camera=({:.1},{:.1}) floating={} focus_history={}",
+                windows,
+                data.active_workspace,
+                data.zoom(),
+                camera.x,
+                camera.y,
+                data.floating_windows.len(),
+                data.focus_history.len()
+            )
+        });
         backend::udev::render_if_needed(data);
         data.space.refresh();
         data.popups.cleanup();

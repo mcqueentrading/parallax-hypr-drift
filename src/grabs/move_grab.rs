@@ -448,6 +448,11 @@ impl PointerGrab<DriftWm> for MoveSurfaceGrab {
                     .filter(|(member, _)| member.alive())
                     .map(|(member, _)| member.clone()),
             );
+            crate::diagnostics::log(format!(
+                "grab:move_release reconcile_windows={} cluster_members={}",
+                moved_windows.len(),
+                self.cluster_members.len()
+            ));
             for window in moved_windows {
                 data.reconcile_moved_tiled_window(&window);
             }

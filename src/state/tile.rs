@@ -3,6 +3,7 @@ use smithay::desktop::Window;
 use smithay::reexports::wayland_server::{Resource, backend::ObjectId};
 use smithay::utils::{Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
+use std::time::Instant;
 
 use super::{DriftWm, FocusTarget, WorkspaceId};
 
@@ -61,6 +62,7 @@ impl DriftWm {
         };
 
         if self.floating_windows.remove(&id) {
+            crate::diagnostics::log(format!("tile:toggle_floating_to_tiled id={id:?}"));
             // Hyprland-style transition: toggling back to tiled reinserts the
             // window into the layout tree, rather than reusing stale geometry.
             let workspace = self
@@ -73,6 +75,7 @@ impl DriftWm {
             self.tile_workspace(workspace, false);
             self.stabilize_tiled_workspace_view();
         } else {
+            crate::diagnostics::log(format!("tile:toggle_floating_to_float id={id:?}"));
             self.floating_windows.insert(id.clone());
             let source_workspace = self
                 .workspace_for_window_id(&id)
@@ -147,6 +150,10 @@ impl DriftWm {
             .workspace_for_window_id(&id)
             .or_else(|| self.workspace_for_window(&window));
 
+        crate::diagnostics::log(format!(
+            "tile:move_to_workspace id={id:?} source={source_workspace:?} target={workspace_id}"
+        ));
+
         self.floating_windows.remove(&id);
         self.purge_workspace_tile_state(&id, true);
         self.assign_window_to_workspace(id, workspace_id);
@@ -170,6 +177,7 @@ impl DriftWm {
 
     pub fn reconcile_moved_tiled_window(&mut self, window: &Window) {
         if !self.in_workspace_perspective() {
+            crate::diagnostics::log("tile:reconcile_moved skip=not_workspace_perspective");
             return;
         }
         if !self.is_tiling_candidate(window) {
@@ -187,6 +195,9 @@ impl DriftWm {
             .workspace_for_window(window)
             .or(source_workspace)
             .unwrap_or(self.active_workspace);
+        crate::diagnostics::log(format!(
+            "tile:reconcile_moved id={id:?} source={source_workspace:?} target={target_workspace}"
+        ));
 
         if source_workspace != Some(target_workspace) {
             self.assign_window_to_workspace(id, target_workspace);
@@ -205,15 +216,24 @@ impl DriftWm {
     pub fn prepare_tiled_window_unmap(&mut self, id: &ObjectId) -> Option<WorkspaceId> {
         self.floating_windows.remove(id);
         let source_workspace = self.workspace_for_window_id(id);
+        crate::diagnostics::log(format!(
+            "tile:prepare_unmap id={id:?} source={source_workspace:?}"
+        ));
         self.purge_workspace_tile_state(id, true);
         source_workspace
     }
 
     pub fn retile_after_window_unmap(&mut self, source_workspace: Option<WorkspaceId>) {
         let Some(workspace_id) = source_workspace else {
+            crate::diagnostics::log("tile:retile_after_unmap skip=no_workspace");
             return;
         };
 
+        crate::diagnostics::log(format!(
+            "tile:retile_after_unmap workspace={workspace_id} perspective={} active_ws={}",
+            self.in_workspace_perspective(),
+            self.active_workspace
+        ));
         self.tile_workspace(workspace_id, false);
         if self.in_workspace_perspective() && workspace_id == self.active_workspace {
             self.stabilize_tiled_workspace_view();
@@ -223,6 +243,11 @@ impl DriftWm {
     pub fn tile_current_workspace_windows(&mut self) {
         self.sync_active_workspace_from_pointer();
         let workspace_id = self.active_workspace;
+        crate::diagnostics::log(format!(
+            "tile:current_workspace_begin workspace={workspace_id} perspective={} zoom={:.3}",
+            self.in_workspace_perspective(),
+            self.zoom()
+        ));
 
         let ids: Vec<ObjectId> = self
             .space
@@ -233,8 +258,15 @@ impl DriftWm {
             .collect();
 
         if ids.is_empty() {
+            crate::diagnostics::log(format!(
+                "tile:current_workspace_skip workspace={workspace_id} reason=no_windows"
+            ));
             return;
         }
+        crate::diagnostics::log(format!(
+            "tile:current_workspace_collect workspace={workspace_id} ids={}",
+            ids.len()
+        ));
 
         for id in &ids {
             self.floating_windows.remove(id);
@@ -377,6 +409,7 @@ impl DriftWm {
     }
 
     fn tile_workspace(&mut self, workspace_id: WorkspaceId, assign_unassigned: bool) {
+        let started = Instant::now();
         self.floating_windows.retain(|id| {
             self.space
                 .elements()
@@ -390,11 +423,21 @@ impl DriftWm {
             .cloned()
             .collect();
         let count = windows.len();
+        crate::diagnostics::log(format!(
+            "tile:workspace_begin workspace={workspace_id} assign_unassigned={assign_unassigned} candidates={count} floating={} active_ws={} perspective={}",
+            self.floating_windows.len(),
+            self.active_workspace,
+            self.in_workspace_perspective()
+        ));
         if count == 0 {
             if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
                 workspace.windows.clear();
                 workspace.tile_rects.clear();
             }
+            crate::diagnostics::log(format!(
+                "tile:workspace_end workspace={workspace_id} reason=no_candidates elapsed_ms={}",
+                started.elapsed().as_millis()
+            ));
             return;
         }
 
@@ -441,6 +484,10 @@ impl DriftWm {
             if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
                 workspace.tile_rects.clear();
             }
+            crate::diagnostics::log(format!(
+                "tile:workspace_end workspace={workspace_id} reason=no_workspace_windows elapsed_ms={}",
+                started.elapsed().as_millis()
+            ));
             return;
         }
 
@@ -486,6 +533,8 @@ impl DriftWm {
             workspace.tile_rects = next_tile_rects.clone();
         }
 
+        let mut configured = 0usize;
+        let mut remapped = 0usize;
         for window in windows.iter() {
             let Some(id) = Self::window_object_id(window) else {
                 continue;
@@ -506,13 +555,20 @@ impl DriftWm {
                         state.size = Some(size);
                     });
                     toplevel.send_configure();
+                    configured += 1;
                 }
             }
             if !already_tiled {
                 self.space.map_element(window.clone(), loc, false);
+                remapped += 1;
             }
         }
         self.sync_pointer_focus_under_cursor();
         self.mark_all_dirty();
+        crate::diagnostics::log(format!(
+            "tile:workspace_end workspace={workspace_id} windows={} configured={configured} remapped={remapped} elapsed_ms={}",
+            windows.len(),
+            started.elapsed().as_millis()
+        ));
     }
 }

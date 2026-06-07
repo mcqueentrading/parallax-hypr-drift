@@ -37,6 +37,7 @@ impl XdgShellHandler for DriftWm {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         tracing::info!("New toplevel surface");
         let wl_surface = surface.wl_surface().clone();
+        crate::diagnostics::log(format!("xdg:new_toplevel surface={:?}", wl_surface.id()));
         let window = Window::new_wayland_window(surface);
 
         // Place at screen center (no size offset — size unknown until first commit).
@@ -225,6 +226,10 @@ impl XdgShellHandler for DriftWm {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         let wl_surface = surface.wl_surface().clone();
+        crate::diagnostics::log(format!(
+            "xdg:destroy_toplevel surface={:?}",
+            wl_surface.id()
+        ));
         self.decorations.remove(&wl_surface.id());
         self.render.shadow_cache.remove(&wl_surface.id());
         self.render.border_cache.remove(&wl_surface.id());
@@ -354,6 +359,11 @@ impl XdgShellHandler for DriftWm {
             // Remove from focus history before unmapping
             self.focus_history.retain(|w| w != window);
             let old_workspace = self.prepare_tiled_window_unmap(&wl_surface.id());
+            crate::diagnostics::log(format!(
+                "xdg:unmap_prepare surface={:?} old_workspace={:?}",
+                wl_surface.id(),
+                old_workspace
+            ));
             // Clamp or clear cycle index if cycling is active
             if self.cycle_state.is_some() {
                 if self.focus_history.is_empty() {
@@ -364,6 +374,11 @@ impl XdgShellHandler for DriftWm {
             }
             self.space.unmap_elem(window);
             self.retile_after_window_unmap(old_workspace);
+            crate::diagnostics::log(format!(
+                "xdg:unmap_done surface={:?} old_workspace={:?}",
+                wl_surface.id(),
+                old_workspace
+            ));
             // The window may have sat under the cursor; re-target pointer focus
             // now that it's gone so clicks don't fall into the destroyed surface.
             self.refresh_pointer_focus();

@@ -418,9 +418,23 @@ impl CompositorHandler for DriftWm {
                         };
                         let activate = applied.as_ref().is_none_or(|a| !a.widget);
                         self.space.map_element(window.clone(), pos, activate);
+                        crate::diagnostics::log(format!(
+                            "compositor:first_map surface={:?} pos=({},{}) activate={} perspective={} zoom={:.3}",
+                            root.id(),
+                            pos.0,
+                            pos.1,
+                            activate,
+                            self.in_workspace_perspective(),
+                            self.zoom()
+                        ));
                         if self.in_workspace_perspective() {
                             self.tile_windows();
                             self.stabilize_tiled_workspace_view();
+                        } else {
+                            crate::diagnostics::log(format!(
+                                "compositor:first_map_skip_tile surface={:?} reason=not_workspace_perspective",
+                                root.id()
+                            ));
                         }
                     }
 
