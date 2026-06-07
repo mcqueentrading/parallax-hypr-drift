@@ -43,6 +43,32 @@ impl DriftWm {
             })
     }
 
+    fn snap_window_to_existing_tile(&mut self, window: &Window, id: &ObjectId) -> bool {
+        let Some(rect) = self.tile_rects.get(id).cloned().or_else(|| {
+            self.workspaces
+                .values()
+                .find_map(|workspace| workspace.tile_rects.get(id).cloned())
+        }) else {
+            return false;
+        };
+
+        crate::diagnostics::log(format!(
+            "tile:snap_existing id={id:?} loc=({}, {}) size={}x{}",
+            rect.loc.x, rect.loc.y, rect.size.w, rect.size.h
+        ));
+        if let Some(toplevel) = window.toplevel() {
+            crate::handlers::set_tiled_states(&toplevel);
+            toplevel.with_pending_state(|state| {
+                state.size = Some(rect.size);
+            });
+            toplevel.send_configure();
+        }
+        self.space.map_element(window.clone(), rect.loc, false);
+        self.sync_pointer_focus_under_cursor();
+        self.mark_all_dirty();
+        true
+    }
+
     fn is_tiling_candidate(&self, window: &Window) -> bool {
         if window.is_widget() || window.parent_surface().is_some() || window.is_modal() {
             return false;
@@ -198,6 +224,15 @@ impl DriftWm {
         crate::diagnostics::log(format!(
             "tile:reconcile_moved id={id:?} source={source_workspace:?} target={target_workspace}"
         ));
+
+        if source_workspace == Some(target_workspace)
+            && self.snap_window_to_existing_tile(window, &id)
+        {
+            crate::diagnostics::log(format!(
+                "tile:reconcile_moved_same_workspace id={id:?} workspace={target_workspace}"
+            ));
+            return;
+        }
 
         if source_workspace != Some(target_workspace) {
             self.assign_window_to_workspace(id, target_workspace);
@@ -443,6 +478,10 @@ impl DriftWm {
 
         let all_window_ids: Vec<ObjectId> =
             windows.iter().filter_map(Self::window_object_id).collect();
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=ids ids={}",
+            all_window_ids.len()
+        ));
         for workspace in self.workspaces.values_mut() {
             workspace
                 .windows
@@ -451,12 +490,19 @@ impl DriftWm {
                 .tile_rects
                 .retain(|id, _| workspace.windows.contains(id));
         }
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=purged"
+        ));
 
         let assigned_ids: Vec<ObjectId> = self
             .workspaces
             .values()
             .flat_map(|workspace| workspace.windows.iter().cloned())
             .collect();
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=assigned assigned={}",
+            assigned_ids.len()
+        ));
         if assign_unassigned && let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
             for id in &all_window_ids {
                 if !assigned_ids.iter().any(|assigned| assigned == id) {
@@ -470,6 +516,10 @@ impl DriftWm {
             .get(&workspace_id)
             .map(|workspace| workspace.windows.iter().cloned().collect())
             .unwrap_or_default();
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=active_ids active_ids={}",
+            active_window_ids_unordered.len()
+        ));
         let windows: Vec<Window> = windows
             .into_iter()
             .filter(|window| {
@@ -493,6 +543,10 @@ impl DriftWm {
 
         let active_window_ids: Vec<ObjectId> =
             windows.iter().filter_map(Self::window_object_id).collect();
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=filtered filtered={}",
+            active_window_ids.len()
+        ));
         let full_area = self.workspace_tile_area(workspace_id);
         let gap = self.config.snap_gap.max(0.0).round() as i32;
         // Rebuild the active workspace tree from current tiled membership.
@@ -502,6 +556,10 @@ impl DriftWm {
         let new_ids = active_window_ids;
 
         for new_id in new_ids {
+            crate::diagnostics::log(format!(
+                "tile:workspace_phase workspace={workspace_id} phase=place id={new_id:?} placed={}",
+                next_tile_rects.len()
+            ));
             if next_tile_rects.is_empty() {
                 next_tile_rects.insert(new_id, full_area);
                 continue;
@@ -532,6 +590,10 @@ impl DriftWm {
         if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
             workspace.tile_rects = next_tile_rects.clone();
         }
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=rects rects={}",
+            next_tile_rects.len()
+        ));
 
         let mut configured = 0usize;
         let mut remapped = 0usize;
@@ -563,7 +625,13 @@ impl DriftWm {
                 remapped += 1;
             }
         }
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=configured configured={configured} remapped={remapped}"
+        ));
         self.sync_pointer_focus_under_cursor();
+        crate::diagnostics::log(format!(
+            "tile:workspace_phase workspace={workspace_id} phase=focus_synced"
+        ));
         self.mark_all_dirty();
         crate::diagnostics::log(format!(
             "tile:workspace_end workspace={workspace_id} windows={} configured={configured} remapped={remapped} elapsed_ms={}",
