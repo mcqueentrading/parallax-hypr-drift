@@ -11,8 +11,10 @@ static LAST_HEARTBEAT: OnceLock<Mutex<Instant>> = OnceLock::new();
 fn log_file() -> Option<&'static Mutex<File>> {
     LOG_FILE
         .get_or_init(|| {
-            let path = std::env::var("DRIFTWM_DIAG_LOG")
-                .unwrap_or_else(|_| "/tmp/parallax-hypr-drift.log".to_string());
+            let path = std::env::var("DRIFTWM_DIAG_LOG").unwrap_or_else(|_| {
+                "/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log"
+                    .to_string()
+            });
             OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -39,6 +41,7 @@ pub fn log(event: impl AsRef<str>) {
             std::process::id(),
             event.as_ref()
         );
+        let _ = file.flush();
     }
 }
 

@@ -42,7 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    diagnostics::log("startup: driftwm diagnostics online log=/tmp/parallax-hypr-drift.log");
+    diagnostics::log(
+        "startup: driftwm diagnostics online log=/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log",
+    );
 
     if std::env::args().any(|a| a == "--help" || a == "-h") {
         println!(
