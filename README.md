@@ -1,426 +1,308 @@
-## Parallax Hypr Drift Fork
+# Parallax Hypr Drift
 
 <h1 align="center"><img alt="Parallax Hypr Drift" src="assets/parallax/logo.png" width="420"></h1>
 
-This repo is an experimental DriftWM fork that blends DriftWM's infinite
-canvas with a Hyprland-inspired tiling workflow. It keeps upstream DriftWM as
-the base, then adds:
+Parallax Hypr Drift is an experimental Wayland compositor fork. The goal is
+simple: keep DriftWM's infinite canvas, but make it behave more like Hyprland
+for everyday desktop work.
 
-- Hyprland-style split placement for new tiled windows
-- six visible workspace zones on one infinite canvas (`Mod+1` through `Mod+6`)
-- Hyprland-style send hovered/focused window to zone (`Mod+Shift+1` through `Mod+Shift+6`)
-- mandatory workspace-bounded tiling for normal windows
-- `toggle-floating` window action
-- focus-follows-cursor support enabled in the parallax config
-- stronger DBus/Wayland environment export for launched apps
-- generic launcher/config examples
-- parallax Matrix-style shader/config under [`parallax-hypr-drift/`](parallax-hypr-drift/)
+The current direction is **Hyprland-style workspaces on one continuous canvas**.
+Instead of hiding workspaces off-screen, six zones exist together on the same
+infinite plane. You can jump between them like workspaces, zoom out to see the
+larger map, and later bend that map into parallax/cube views.
 
-The `parallax-hypr-drift/` folder contains the custom config, shader, and
-launcher example. Private machine-specific session wiring should stay outside
-the public repo.
+This is experimental software. It is built for rapid compositor research, not a
+stable daily-driver promise.
 
-The fork treats each numbered zone as a Hyprland-like workspace, but all six
-zones remain part of the same visible DriftWM canvas. The default topology is a
-flat grid (`1 2 3` over `4 5 6`) for normal desktop use. A future parallax mode
-can opt into `workspace_layout = "cube-net"`, where `2` is front/center, `1` is
-left, `3` is right, `4` is above, `5` is below, and `6` is the back zone. New
-normal windows tile inside the active zone; `Mod+V` toggles the focused window
-into floating mode. `Mod+Shift+1..6` sends the hovered or focused window into
-that zone and retiles it with the windows already there.
+## Current Focus
 
-The upstream DriftWM README continues below for base compositor details.
+- Six visible workspace zones on one infinite canvas.
+- Hyprland-inspired tiled window placement.
+- New tiled windows spawn under the cursor and split the tile under the cursor.
+- Normal windows are expected to tile inside their current workspace zone.
+- Floating is explicit through `toggle-floating`, not the default behavior.
+- Moving a window between zones retiles it with the windows already there.
+- Closing or floating a tiled window should make the remaining windows fill the
+  gap.
+- Stronger graphical session environment export for DBus, Wayland, XDG portals,
+  and XWayland-style app launches.
+- Persistent freeze diagnostics while the compositor is being hardened.
 
-<h1 align="center"><img alt="driftwm upstream logo" src="assets/logo.jpg" width="500"></h1>
-<p align="center">A trackpad-first infinite canvas Wayland compositor.</p>
-<p align="center">
-    <a href="https://github.com/malbiruk/driftwm/blob/main/LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
-    <a href="https://github.com/malbiruk/driftwm/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/malbiruk/driftwm?logo=github"></a>
-    <a href="https://repology.org/project/driftwm/versions"><img alt="Packaging status" src="https://repology.org/badge/tiny-repos/driftwm.svg"></a>
-</p>
-<p align="center"><sub>Primary repository: <a href="https://github.com/malbiruk/driftwm">GitHub</a> · Mirror: <a href="https://codeberg.org/malbiruk/driftwm">Codeberg</a></sub></p>
+## Why This Fork Exists
 
-https://github.com/user-attachments/assets/df24e442-6ad0-4520-9491-cb666da06d05
+Hyprland already has excellent tiling behavior, focus behavior, and practical
+desktop ergonomics. The missing piece for this project is an infinite canvas
+where workspace areas can remain spatially visible instead of being hidden when
+inactive.
 
-Traditional window managers arrange windows to fit your screen. Stacking compositors do so by piling windows on top of each other; tiling compositors do so by squeezing them to fit and utilizing workspaces.
+DriftWM already provides the infinite canvas base. Parallax Hypr Drift adds the
+Hyprland-like parts we need on top: workspace zones, mandatory tiling, cursor
+anchored placement, window movement between zones, and a future path toward
+parallax projection.
 
-`driftwm` is an infinite-canvas compositor: windows live at their native size on an infinite 2D canvas, and your display is a camera viewing it. When two windows come close, they snap together, forming implicit groups that can be moved, resized, and viewed together. No tiling, no workspaces, window overlaps happen only on purpose.
+## Workspace Model
 
-Designed with laptops in mind: navigation and window management are trackpad-first; the infinite canvas makes the most of a small screen.
+The compositor currently supports six workspace zones.
 
-Built on [smithay](https://github.com/Smithay/smithay). Inspired by [vxwm](https://codeberg.org/wh1tepearl/vxwm); borrows implementation details from [niri](https://github.com/YaLTeR/niri).
+Default layout:
 
-> [!WARNING]  
-> This is experimental software. Primarily built with AI. Use at your own risk.
+```text
+1  2  3
+4  5  6
+```
 
-## Features
+Each zone is a workspace-sized rectangle on the infinite canvas. `Mod+1` through
+`Mod+6` moves the camera to that zone. Windows inside that zone tile within that
+zone's boundaries.
 
-### Pan & zoom
+Future parallax/cube layout:
 
-https://github.com/user-attachments/assets/a5f14739-7762-4515-abb1-0de6990de4a3
+```text
+        4
+1       2       3
+        5
+        6
+```
 
-Infinite 2D canvas with viewport panning, zoom, and scroll momentum. A quick
-flick carries the viewport smoothly until friction stops it.
+The long-term idea is that normal mode can use the flat `1 2 3 / 4 5 6` grid,
+while parallax mode can reinterpret the same six stable workspace IDs as a cube
+net:
 
-| Input              | Action            | Context   |
-| ------------------ | ----------------- | --------- |
-| 3-finger swipe     | Pan viewport      | anywhere  |
-| Trackpad scroll    | Pan viewport      | on-canvas |
-| `Mod` + LMB drag   | Pan viewport      | anywhere  |
-| `Mod+Ctrl` + arrow | Pan viewport      | —         |
-| 2-finger pinch     | Zoom              | on-canvas |
-| 3-finger pinch     | Zoom              | anywhere  |
-| `Mod` + scroll     | Zoom at cursor    | anywhere  |
-| `Mod+=` / `Mod+-`  | Zoom in / out     | —         |
-| `Mod+0` / `Mod+Z`  | Reset zoom to 1.0 | —         |
+- `2` is front/center.
+- `1` is left.
+- `3` is right.
+- `4` is above.
+- `5` is below.
+- `6` is behind.
 
-### Window navigation
+Window ownership should stay stable. Parallax should change how the canvas is
+projected, not force windows to be reassigned.
 
-https://github.com/user-attachments/assets/5b7d89cd-b065-4309-ae74-30bfe68a8abb
+## Key Bindings
 
-Jump to the nearest window in any direction via cone search. MRU cycling
-(`Alt-Tab`) with hold-to-commit. Zoom-to-fit shows all windows at once.
-Configurable anchors act as navigation targets for directional jumps even
-with no window there — useful for areas with pinned widgets.
+`Mod` means Super by default.
 
-| Input                        | Action                                     |
-| ---------------------------- | ------------------------------------------ |
-| 4-finger swipe               | Jump to nearest window (natural direction) |
-| `Mod+Ctrl` + LMB drag        | Jump to nearest window (natural direction) |
-| `Mod` + arrow                | Jump to nearest window in direction        |
-| `Alt-Tab` / `Alt-Shift-Tab`  | Cycle windows (MRU)                        |
-| 4-finger pinch in / `Mod+W`  | Zoom-to-fit (overview)                     |
-| 4-finger pinch out / `Mod+A` | Home toggle (origin and back)              |
-| 4-finger hold / `Mod+C`      | Center focused window                      |
-| `Mod+1-4`                    | Jump to bookmarked canvas position         |
+| Binding | Action |
+| --- | --- |
+| `Mod+1` .. `Mod+6` | Jump camera to workspace zone |
+| `Mod+Shift+1` .. `Mod+Shift+6` | Move hovered/focused window to zone and retile |
+| `Mod+V` | Toggle focused window floating/tiled |
+| `Mod+T` | Force all windows in the current zone back into tiling |
+| `Mod+W` | Zoom out / overview |
+| `Mod+Q` | Launch terminal in the example config |
+| `Mod+C` | Close focused window in the example config |
+| `Print` | Screenshot to clipboard in the example config |
+| `Shift+Print` | Region screenshot to clipboard in the example config |
 
-All 4-finger navigation gestures also work as `Mod` + 3-finger for smaller
-trackpads.
+Check the config for exact local bindings. Public example config lives under:
 
-### Snapping
+```text
+parallax-hypr-drift/
+```
 
-https://github.com/user-attachments/assets/8a468e69-8887-4d27-8457-cdd2753948ca
+## Tiling Behavior
 
-Move window with 3-finger doubletap-swipe or `Alt` + drag. Resize with `Alt` + 3-finger swipe. Snapping kicks in as edges approach each other. Drag past the viewport edge and the canvas auto-pans.
+The tiler is being shaped around Hyprland's practical behavior:
 
-**Snapped windows form a cluster.** Two benefits: neighbors stay visible at your view's edge for spatial context, and `Shift` + any move/resize/fit action acts on the whole cluster. Shuffle a layout in one drag, resize a row of panes proportionally, or scope an overview to just the cluster (`Mod+Shift+W`). No explicit grouping to manage.
+- Spawn in the workspace under the cursor when in workspace perspective.
+- If the cursor is over an existing tiled window, split that tile.
+- If no tile is under the cursor, fall back to focused/largest tile.
+- Keep tiled windows bounded by their workspace rectangle.
+- When a window leaves a workspace, retile the remaining windows so there is no
+  empty hole.
+- If a dragged tiled window is released inside the same workspace, snap it back
+  to its existing tile instead of rebuilding the whole layout.
 
-> [!TIP]
-> While dragging a window, keyboard shortcuts still work. Use `Mod+1-4`
-> to jump to a bookmark or `Mod+A` to go home — your held window comes with you.
+Floating windows are treated as exceptions. The intended model is tiled by
+default, floating only when the user explicitly asks for it.
 
-Fit-window (`Mod+M`) is the maximize analogue — centers the viewport, resets
-zoom to 1.0, and resizes the window to fill the screen. Toggle again to
-restore. Fullscreen (`Mod+F`) is a viewport mode, not a window state — any canvas
-action (launching an app, navigating) naturally exits it.
+## Configuration Today
 
-| Input                                     | Action                        |
-| ----------------------------------------- | ----------------------------- |
-| 3-finger doubletap-swipe                  | Move window                   |
-| `Alt` + LMB drag                          | Move window                   |
-| `Alt+Shift` + LMB drag                    | Move snapped windows          |
-| `Alt` + 3-finger swipe                    | Resize window                 |
-| `Alt+Shift` + 3-finger swipe              | Resize snapped window         |
-| `Alt` + RMB drag                          | Resize window                 |
-| `Alt` + MMB click / `Mod+M`               | Fit window (maximize/restore) |
-| `Alt+Shift` + MMB click / `Mod+Shift+M`   | Fit snapped window            |
-| `Mod` + 4-finger pinch in / `Mod+Shift+W` | Zoom-to-fit snapped windows   |
-| `Alt` + 2-finger pinch in/out             | Fit window                    |
-| `Alt` + 3-finger pinch in/out             | Toggle fullscreen             |
-| `Mod` + MMB click / `Mod+F`               | Toggle fullscreen             |
-| `Mod+Shift` + arrow                       | Nudge window 20px             |
+Current config is still TOML-compatible with the upstream base.
 
-### Infinite background
+Default config path:
 
-https://github.com/user-attachments/assets/6e9eb7f7-0c73-4fdd-b7aa-230b8ff0a172
+```text
+~/.config/driftwm/config.toml
+```
 
-The background is part of the canvas — it scrolls and zooms with the viewport,
-not stuck to the screen. This gives spatial awareness when panning.
-
-Three modes (all rendered as shaders internally):
-
-- **`shader`** — procedural GLSL, animated or static, optionally sampling an image via `texture`. Default is a dot grid. See [docs/shaders.md](docs/shaders.md) to write your own. Bundled shaders live in `extras/wallpapers/{static,animated,textured}/`.
-- **`tile`** — PNG/JPG (single texture, tiled infinitely), or a tiled pyramidal TIFF for [gigapixel wallpapers](docs/gigapixel-wallpapers.md).
-- **`wallpaper`** — single image stretched to fill viewport (does not scroll/zoom) — a classic desktop wallpaper.
-
-> [!NOTE]
-> GPU cost scales with what a shader reads: one that reads no viewport uniforms renders once (as cheap as `wallpaper`); reading `u_camera`/`u_zoom` redraws on pan/zoom; reading `u_time` redraws every frame. Tiles redraw on pan/zoom; `wallpaper` renders once.
+Useful fork-specific options include:
 
 ```toml
-[background]
-type = "shader"
-path = "~/.config/driftwm/bg.glsl"
-# texture = "~/Pictures/img.jpg"  # if it's a texture-based shader
-
-# Or: type = "tile",      path = "~/Pictures/tile.png"
-# Or: type = "tile",      path = "~/Pictures/world.tif"   # pyramidal TIFF
-# Or: type = "wallpaper", path = "~/Pictures/wallpaper.jpg"
+workspace_layout = "grid"      # current normal layout
+window_placement = "tile"      # current parallax/hypr workflow
+focus_follows_mouse = true
 ```
 
-### Window rules
+The public example folder contains a fork-oriented config, shader, and launcher
+pieces:
 
-https://github.com/user-attachments/assets/af603001-9f08-4d42-b50a-0342d06e954b
-
-Match windows by `app_id` and/or `title` (glob patterns) and control
-everything: position, size, decorations, blur, opacity, pass-through keys, and widget behavior. All
-fields are independent and combine freely.
-
-**Widgets**: set `widget = true` to pin a window in place — immovable, below
-normal windows, excluded from Alt-Tab. Works for both regular windows and
-layer-shell surfaces (e.g. waybar). Use this for clocks, system stats, trays, or
-anything you want fixed on the canvas.
-
-```toml
-# Frosted-glass terminal
-[[window_rules]]
-app_id = "Alacritty"
-opacity = 0.85
-blur = true
-
-# Desktop widget — pinned, borderless
-[[window_rules]]
-app_id = "my-clock"
-position = [50, 50]
-widget = true
-decoration = "none"
+```text
+parallax-hypr-drift/
 ```
 
-> [!TIP]
-> To find a window's `app_id`, check `$XDG_RUNTIME_DIR/driftwm/state` —
-> the `windows` field lists all open windows by their app ID.
+Machine-specific login/session wiring should stay outside the public repo.
 
-See [docs/window-rules.md](docs/window-rules.md) for more details.
+## Lua Config Path
 
-### Multi-monitor
+TOML is useful for simple settings, but this fork is moving toward a
+Hyprland-style programmable config layer.
 
-https://github.com/user-attachments/assets/3f6cc3a8-a4ed-4d78-80fc-d5a92478c48f
+Target direction:
 
-Multiple monitors are independent viewports on the same canvas. An outline on each monitor shows where the
-other monitors' viewports are. Cursor crosses between monitors freely; dragged
-windows teleport to the target viewport's canvas position.
+- Keep TOML compatibility while the compositor stabilizes.
+- Add optional `config.lua`.
+- Lua builds the same internal config structure Rust uses today.
+- Lua handles expressive user setup: binds, startup commands, workspace layout,
+  parallax mode toggles, theme logic, and future animation settings.
+- Rust remains authoritative for compositor state, Wayland safety, window
+  ownership, tiling validity, and final config validation.
 
-| Input             | Action                         |
-| ----------------- | ------------------------------ |
-| `Mod+Alt` + arrow | Send window to adjacent output |
+Example direction:
 
-### Panels, docks & taskbars
+```lua
+drift.mod_key("super")
+drift.workspace_layout("grid")
+drift.window_placement("tile")
+drift.focus_follows_mouse(true)
 
-https://github.com/user-attachments/assets/83c2ad30-fbfa-4cf2-aa47-905826889dcb
+drift.bind("mod+q", "spawn kitty")
+drift.bind("mod+c", "close-window")
+drift.bind("mod+v", "toggle-floating")
+drift.bind("mod+t", "tile-current-workspace")
 
-Layer shell surfaces (waybar, fuzzel, mako) work as expected. Foreign toplevel
-management means your dock/taskbar shows all windows — click one and the
-viewport pans to it and centers it. See [`extras/`](extras/) for a fuzzel
-window-search script that lets you search and jump to any open window.
+drift.command("parallax-mode", function()
+  drift.workspace_layout("cube-net")
+  drift.parallax.enable_cube_projection()
+end)
 
-### Everything else
-
-- New window placement: in viewport center (default), under cursor, or snapped adjacent to the focused window's cluster
-- Click-to-focus (default) or focus-follows-mouse (sloppy focus)
-- Session lock (swaylock), idle notify (swayidle/hypridle)
-- Screen capture: screencasting (OBS, Firefox, Discord) and screenshots
-- 40+ Wayland protocols
-
-## Install
-
-### Arch Linux (AUR)
-
-```bash
-yay -S driftwm
+drift.bind("mod+p", "lua parallax-mode")
 ```
 
-or for latest main:
+Lua should configure and request behavior. Rust should decide what is valid.
 
-```bash
-yay -S driftwm-git
+## Roadmap
+
+### Stage 1: Workspace Zones
+
+Status: in progress.
+
+- Six stable workspace IDs.
+- Camera jumps with `Mod+1..6`.
+- Window movement with `Mod+Shift+1..6`.
+- Grid layout now, cube-net projection later.
+
+### Stage 2: Mandatory Workspace Tiling
+
+Status: in progress.
+
+- Tiled windows fill the current workspace zone.
+- New windows split the tile under the cursor.
+- Close/unmap/floating transitions retile the remaining windows.
+- `Mod+T` forces the current zone back into tiling.
+
+### Stage 3: Hyprland-Like App Launch Reliability
+
+Status: in progress.
+
+- Export DBus, Wayland, DISPLAY, XDG, and session environment properly.
+- Make launched apps work consistently without first starting another desktop.
+- Improve XWayland app behavior and browser launch behavior.
+
+### Stage 4: Lua Configuration
+
+Status: planned.
+
+- Add optional Lua config loader.
+- Keep TOML during transition.
+- Move user-facing orchestration out of hard-coded Rust where safe.
+
+### Stage 5: Parallax Projection
+
+Status: planned.
+
+- Keep workspace IDs stable.
+- Add a parallax/cube mode that projects the same workspace map differently.
+- Build animation and depth effects around the existing infinite canvas.
+
+### Stage 6: Visual Polish
+
+Status: planned.
+
+- Animated borders.
+- Cleaner workspace outlines.
+- Better focused-window effects.
+- More intentional shader/background presets.
+
+## Diagnostics
+
+Temporary freeze diagnostics are documented here:
+
+```text
+docs/freeze-diagnostics.md
 ```
 
-### NixOS / Nix
+Default freeze log:
 
-A `flake.nix` is included. To build:
-
-```bash
-nix build
+```text
+/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log
 ```
 
-For development (provides native deps, uses your system Rust):
+That log is intentionally file-based and flushed line-by-line because hard
+freezes can prevent normal journal inspection.
 
-```bash
-nix develop
-cargo build
-cargo run
-```
+## Build
 
-To add driftwm as a session in your NixOS config:
+Requires Rust 1.88+.
 
-```nix
-let
-  driftwm-flake = builtins.getFlake "github:malbiruk/driftwm";
-  driftwm = driftwm-flake.packages.x86_64-linux.default;
-in
-{
-  services.displayManager.sessionPackages = [ driftwm ];
-  environment.systemPackages = [ driftwm ];
-}
-```
-
-### Build from source
-
-Requires Rust 1.88+ (edition 2024).
-
-Install build dependencies:
-
-**Fedora:**
-
-```bash
-sudo dnf install libseat-devel libdisplay-info-devel libinput-devel mesa-libgbm-devel libxkbcommon-devel
-```
-
-**Ubuntu/Debian:**
-
-```bash
-sudo apt install libseat-dev libdisplay-info-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev libwayland-dev
-```
-
-**Arch Linux:**
+Arch dependencies:
 
 ```bash
 sudo pacman -S libdisplay-info libinput seatd mesa libxkbcommon
 ```
 
-> [!NOTE]
-> Ubuntu 24.04 ships Rust 1.75 which is too old. Install via
-> [rustup](https://rustup.rs/) instead of `apt install rustc`.
-
-Then build and install:
+Build:
 
 ```bash
-git clone https://github.com/malbiruk/driftwm.git
-cd driftwm
-make build
-sudo make install
+git clone https://github.com/mcqueentrading/parallax-hypr-drift.git
+cd parallax-hypr-drift
+cargo build --release
 ```
 
-To uninstall, run `sudo make uninstall` from the repository.
-
-### Optional runtime dependencies
-
-driftwm runs standalone — none of these are required — but each enables or
-improves a feature:
-
-- `xwayland-satellite` (≥ 0.7) — X11 app support (see below).
-- `xdg-desktop-portal` + `xdg-desktop-portal-wlr` (≥ 0.8.0) or `xdg-desktop-portal-cosmic` — screencasting. wlr needs a dmenu-style picker in `$PATH` (`wmenu`/`wofi`/`rofi`/`bemenu`/`mew`/`fuzzel`) to choose what to share.
-- `grim` + `slurp` — screenshots (+ cropping to region).
-- `adwaita-fonts` — renders SSD title bars in `Adwaita Sans` to match GTK apps; without it a generic sans-serif is substituted. Font, size, weight, and alignment are configurable under `[decorations]`.
-- A cursor theme — most desktops set one up already; on a bare install driftwm falls back to a basic built-in arrow.
-
-**X11 apps** run through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite),
-which driftwm spawns at startup, exporting `DISPLAY=:N` so X11 clients connect
-transparently — no extra config beyond having the binary in `$PATH`.
-
-- **Arch:** `sudo pacman -S xwayland-satellite`
-- **Fedora:** `sudo dnf install xwayland-satellite`
-- **NixOS:** `pkgs.xwayland-satellite`
-- **Debian/Ubuntu:** not yet packaged — `cargo install --locked xwayland-satellite`
-
-If satellite isn't found at startup, driftwm logs a warning and continues without
-X11 support. You can override the binary path or disable the integration in
-[`config.reference.toml`](config.reference.toml) under `[xwayland]`.
-
-### Running
-
-driftwm auto-detects whether it's running nested (inside an existing Wayland
-session) or on real hardware (from a TTY). Just run `driftwm`. For display
-manager integration, select "driftwm" from the session menu.
-
-
-> [!TIP]
-> When launched by a display manager, driftwm runs as a systemd user service — view logs with `journalctl --user -u driftwm.service` (add `-f` to follow). Run directly and logs go to stderr.
-
-## Quick start
-
-`mod` is Super by default. Terminal and launcher are auto-detected (foot/alacritty/kitty, fuzzel/wofi/bemenu); override in config.
-
-| Shortcut           | Action        |
-| ------------------ | ------------- |
-| `mod+return`       | Open terminal |
-| `mod+d`            | Open launcher |
-| `mod+q`            | Close window  |
-| `mod+l`            | Lock screen   |
-| `mod+ctrl+shift+q` | Quit          |
-
-Feature-specific bindings (navigation, zoom, snap) are in their respective sections above.
-
-## Configuration
-
-Config file: `~/.config/driftwm/config.toml` (respects `XDG_CONFIG_HOME`).
+Run the built compositor directly:
 
 ```bash
-mkdir -p ~/.config/driftwm
-cp /etc/driftwm/config.reference.toml ~/.config/driftwm/config.toml
+./target/release/driftwm --config parallax-hypr-drift/config.toml
 ```
 
-Missing file uses built-in defaults. Partial configs merge with defaults —
-only specify what you want to change. Use `"none"` to unbind a default binding.
-Validate without starting: `driftwm --check-config`.
+For development checks:
 
-```toml
-# Launch programs at startup
-autostart = ["waybar", "swaync", "swayosd-server"]
+```bash
+cargo fmt
+cargo check
 ```
 
-See [`config.reference.toml`](config.reference.toml) for all options: input
-settings, scroll/momentum tuning, snap behavior, decorations, effects,
-per-output config, gesture bindings, mouse bindings, and window rules.
+## Useful Runtime Tools
 
-## Example setup
+- `xwayland-satellite` for X11 apps.
+- `xdg-desktop-portal` and `xdg-desktop-portal-wlr` for portals/screencast.
+- `grim`, `slurp`, and `wl-clipboard` for screenshots.
+- `kitty`, `foot`, or another Wayland terminal.
+- `fuzzel`, `wofi`, or another launcher.
 
-driftwm is just a compositor — everything else is standard Wayland tooling.
-Here are some tools that work well with it:
+## Upstream Credit
 
-- **waybar** — Status bar / taskbar
-- **crystal-dock** — macOS-style dock
-- **fuzzel / wofi** — App launcher
-- **mako / swaync** — Notifications
-- **swaylock** — Lock screen
-- **swayidle / hypridle** — Idle timeout (lock, suspend)
-- **swayosd** — Volume/brightness OSD
-- **grim + slurp** — Screenshots
-- **wlr-randr / wdisplays** — Output configuration
-- **COSMIC Settings** — Wi-Fi, Bluetooth, sound (or **nm-applet** + **blueman** + **pavucontrol**)
+This project is based on DriftWM by malbiruk.
 
-Compositor-agnostic full Wayland shells like **noctalia**, **wayle**, and **dank-material-shell** should work too (`driftwm` supports `wlr-layer-shell` protocol) but without compositor-specific features.
+Upstream:
 
-The [`extras/`](extras/) directory contains a complete setup — driftwm config,
-GLSL shader wallpapers, Python widgets (clock, calendar, system stats, power
-menu), waybar with taskbar/tray, fuzzel window-search script, and window rules
-tying it all together. Use it as a starting point or steal pieces.
+```text
+https://github.com/malbiruk/driftwm
+```
 
-## Community tools
-
-- [driftwm-settings](https://github.com/wwmaxik/driftwm-settings) — GTK4 GUI config editor
-- [driftwm-noctalia](https://github.com/youssefvdel/driftwm-noctalia) — noctalia shell fork adapted for driftwm
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-TL;DR: open an issue before writing non-trivial code, keep PRs small and focused.
-
-## Merch
-
-If you want to support the project (or just want a shirt), this is the way.
-
-<p align="left"><img src="assets/tshirt.png" width="400"></p>
-
-XL
-
-100 GEL · 37 USD · 2800 RUB
-
-Ships worldwide from Tbilisi.
-
-Order via [Telegram](https://t.me/fiyefiyefiye), [Instagram](https://instagram.com/flwrs_in_ur_eyes), or email [2601074@gmail.com](mailto:2601074@gmail.com).
-
-Revenue goes to me as driftwm's primary maintainer. If you've contributed substantively and want a shirt, drop me a line.
+The original DriftWM provides the infinite-canvas Wayland compositor base. This
+fork changes the workflow direction toward Hyprland-like tiling, six visible
+workspace zones, parallax experiments, and programmable configuration.
 
 ## License
 
