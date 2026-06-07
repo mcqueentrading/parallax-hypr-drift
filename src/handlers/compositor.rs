@@ -382,6 +382,7 @@ impl CompositorHandler for DriftWm {
                             let cursor_pos = if matches!(
                                 self.config.window_placement,
                                 driftwm::config::WindowPlacement::Cursor
+                                    | driftwm::config::WindowPlacement::Tile
                             ) {
                                 self.cursor_placement_pos(geo.size, bar_px)
                             } else {

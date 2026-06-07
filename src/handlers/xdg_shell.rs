@@ -43,15 +43,21 @@ impl XdgShellHandler for DriftWm {
         // Place at screen center (no size offset — size unknown until first commit).
         // The pending_center set will trigger proper centering once size is known.
         let pos = self
-            .active_output()
-            .and_then(|o| self.space.output_geometry(&o))
-            .map(|geo| {
-                let cam = self.camera();
-                let z = self.zoom();
-                (
-                    (cam.x + geo.size.w as f64 / (2.0 * z)) as i32,
-                    (cam.y + geo.size.h as f64 / (2.0 * z)) as i32,
-                )
+            .seat
+            .get_pointer()
+            .map(|pointer| pointer.current_location())
+            .map(|pos| (pos.x.round() as i32, pos.y.round() as i32))
+            .or_else(|| {
+                self.active_output()
+                    .and_then(|o| self.space.output_geometry(&o))
+                    .map(|geo| {
+                        let cam = self.camera();
+                        let z = self.zoom();
+                        (
+                            (cam.x + geo.size.w as f64 / (2.0 * z)) as i32,
+                            (cam.y + geo.size.h as f64 / (2.0 * z)) as i32,
+                        )
+                    })
             })
             .unwrap_or((0, 0));
 
@@ -71,9 +77,16 @@ impl XdgShellHandler for DriftWm {
         if let Some(pointer) = self.seat.get_pointer() {
             let cursor_pos = pointer.current_location();
             if let Some((anchor, _)) = self.space.element_under(cursor_pos)
-                && let (Some(new_id), Some(anchor_id)) =
-                    (Some(wl_surface.id()), anchor.wl_surface().map(|s| s.id()))
+                && !anchor.is_widget()
+                && let Some(anchor_id) = anchor.wl_surface().map(|s| s.id())
+                && !self.floating_windows.contains(&anchor_id)
+                && self.workspace_for_window(&anchor).is_some()
             {
+                let new_id = wl_surface.id();
+                crate::diagnostics::log(format!(
+                    "xdg:new_toplevel_anchor new={:?} anchor={anchor_id:?}",
+                    new_id
+                ));
                 self.pending_tile_anchors.insert(new_id, anchor_id);
             }
         }
