@@ -236,9 +236,22 @@ impl DriftWm {
             return;
         }
 
+        for id in &ids {
+            self.floating_windows.remove(id);
+        }
+
+        for workspace in self.workspaces.values_mut() {
+            for id in &ids {
+                workspace.windows.remove(id);
+                workspace.tile_rects.remove(id);
+            }
+        }
+
+        let Some(workspace) = self.workspaces.get_mut(&workspace_id) else {
+            return;
+        };
         for id in ids {
-            self.floating_windows.remove(&id);
-            self.assign_window_to_workspace(id, workspace_id);
+            workspace.windows.insert(id);
         }
 
         self.tile_workspace(workspace_id, false);
@@ -482,15 +495,22 @@ impl DriftWm {
             };
             let loc = rect.loc;
             let size = rect.size;
+            let current_loc = self.space.element_location(window);
+            let current_size = window.geometry().size;
+            let already_tiled = current_loc == Some(loc) && current_size == size;
 
             if let Some(toplevel) = window.toplevel() {
                 crate::handlers::set_tiled_states(&toplevel);
-                toplevel.with_pending_state(|state| {
-                    state.size = Some(size);
-                });
-                toplevel.send_configure();
+                if !already_tiled {
+                    toplevel.with_pending_state(|state| {
+                        state.size = Some(size);
+                    });
+                    toplevel.send_configure();
+                }
             }
-            self.space.map_element(window.clone(), loc, false);
+            if !already_tiled {
+                self.space.map_element(window.clone(), loc, false);
+            }
         }
         self.sync_pointer_focus_under_cursor();
         self.mark_all_dirty();
