@@ -378,6 +378,9 @@ impl DriftWm {
             Action::ToggleFloating => {
                 self.toggle_floating_window();
             }
+            Action::TileCurrentWorkspace => {
+                self.tile_current_workspace_windows();
+            }
             Action::SendToOutput(dir) => {
                 if let Some(window) = self.focused_window().filter(|w| !w.is_widget())
                     && let Some(from_output) = self.output_for_window(&window)

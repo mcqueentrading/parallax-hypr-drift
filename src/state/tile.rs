@@ -220,6 +220,33 @@ impl DriftWm {
         }
     }
 
+    pub fn tile_current_workspace_windows(&mut self) {
+        self.sync_active_workspace_from_pointer();
+        let workspace_id = self.active_workspace;
+
+        let ids: Vec<ObjectId> = self
+            .space
+            .elements()
+            .filter(|window| !window.is_widget())
+            .filter(|window| self.workspace_for_window(window) == Some(workspace_id))
+            .filter_map(Self::window_object_id)
+            .collect();
+
+        if ids.is_empty() {
+            return;
+        }
+
+        for id in ids {
+            self.floating_windows.remove(&id);
+            self.assign_window_to_workspace(id, workspace_id);
+        }
+
+        self.tile_workspace(workspace_id, false);
+        if self.in_workspace_perspective() {
+            self.stabilize_tiled_workspace_view();
+        }
+    }
+
     fn workspace_tile_area(&self, workspace_id: WorkspaceId) -> Rectangle<i32, Logical> {
         let workspace = self
             .workspaces

@@ -154,6 +154,7 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         "fit-window" => Ok(Action::FitWindow),
         "fit-window-snapped" => Ok(Action::FitWindowSnapped),
         "toggle-floating" => Ok(Action::ToggleFloating),
+        "tile-current-workspace" | "tile-workspace" => Ok(Action::TileCurrentWorkspace),
         "send-to-output" => {
             let dir = parse_direction(arg.ok_or("send-to-output requires a direction")?)?;
             Ok(Action::SendToOutput(dir))

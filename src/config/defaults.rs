@@ -310,6 +310,13 @@ pub(super) fn default_bindings(
         (
             KeyCombo {
                 modifiers: m.clone(),
+                sym: Keysym::from(keysyms::KEY_t),
+            },
+            Action::TileCurrentWorkspace,
+        ),
+        (
+            KeyCombo {
+                modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_m),
             },
             Action::FitWindow,

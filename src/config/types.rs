@@ -60,6 +60,7 @@ pub enum Action {
     FitWindow,
     FitWindowSnapped,
     ToggleFloating,
+    TileCurrentWorkspace,
     SendToOutput(Direction),
     FocusCenter,
     ReloadConfig,
