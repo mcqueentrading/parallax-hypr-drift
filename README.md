@@ -408,12 +408,17 @@ https://github.com/hyprwm/Hyprland
 https://hypr.land
 ```
 
+The parallax direction is also inspired by `neorx_`, whose work helped shape
+the idea of treating the desktop as a depth-aware canvas rather than only a
+flat workspace switcher.
+
 DriftWM provides the infinite-canvas Wayland compositor foundation. This fork
 changes the product direction toward Hyprland-style tiling, focus behavior,
 window placement, monitor ergonomics, and programmable configuration, while
 keeping DriftWM's infinite-canvas foundation. Credit belongs to both projects:
 DriftWM for the editable infinite-canvas base, and Hyprland/Vaxry for the
-proven tiling workflow we are using as the reference target.
+proven tiling workflow we are using as the reference target. `neorx_` deserves
+credit for helping shape the parallax/depth inspiration.
 
 ## License
 
