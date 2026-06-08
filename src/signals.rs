@@ -44,7 +44,9 @@ pub fn listen(handle: &calloop::LoopHandle<'static, DriftWm>) {
         .expect("failed to create signalfd source");
     handle
         .insert_source(signals, |event, _, state| {
-            tracing::info!("received {:?} — stopping compositor", event.signal());
+            let signal = event.signal();
+            tracing::info!("received {:?} — stopping compositor", signal);
+            crate::diagnostics::log(format!("signal:received {signal:?}"));
             state.loop_signal.stop();
         })
         .expect("failed to register signal source on event loop");
