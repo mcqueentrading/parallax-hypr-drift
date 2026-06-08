@@ -42,6 +42,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    std::panic::set_hook(Box::new(|panic_info| {
+        diagnostics::log(format!("panic: {panic_info}"));
+        eprintln!("driftwm panic: {panic_info}");
+    }));
     diagnostics::log(
         "startup: driftwm diagnostics online log=/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log",
     );
@@ -268,8 +272,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })?;
     }
 
-    // After WAYLAND_DISPLAY is set so satellite can connect as a Wayland client.
+    diagnostics::log("startup:xwayland_setup_begin");
     xwayland::setup(&mut data);
+    diagnostics::log("startup:xwayland_setup_done");
 
     // Auto-reap children. Must run after backend init — libseat uses
     // waitpid() during session setup.

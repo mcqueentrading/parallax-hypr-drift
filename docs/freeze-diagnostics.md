@@ -51,6 +51,7 @@ Current call sites:
 
 ```text
 src/main.rs
+src/xwayland.rs
 src/handlers/xdg_shell.rs
 src/handlers/compositor.rs
 src/grabs/move_grab.rs
@@ -63,8 +64,31 @@ Startup and heartbeat:
 
 ```text
 startup: driftwm diagnostics online ...
+startup:xwayland_setup_begin
+startup:xwayland_setup_done
 event_loop:start ...
 heartbeat windows=... active_ws=... zoom=... camera=(...) floating=... focus_history=...
+```
+
+Panic capture:
+
+```text
+panic: ...
+```
+
+XWayland startup:
+
+```text
+xwayland:skip active=... enabled=...
+xwayland:spawn_begin
+xwayland:spawn_ok
+xwayland:spawn_failed err=...
+xwayland:insert_source_ok
+xwayland:insert_source_failed err=...
+xwayland:ready display=:...
+xwayland:xwm_start_ok display=:...
+xwayland:xwm_start_failed err=...
+xwayland:error
 ```
 
 XDG shell lifecycle:
@@ -125,6 +149,13 @@ requests.
 If the last event is `xdg:*` or `compositor:first_map`, focus on new-window
 mapping, cursor-anchor split logic, and initial placement.
 
+If the last event is `startup:xwayland_setup_begin` or `xwayland:spawn_begin`,
+focus on native XWayland startup before the event loop. If `xwayland:ready`
+appears but `xwayland:xwm_start_ok` does not, focus on Smithay XWM attachment.
+
+If the last event is `panic:*`, that is the actionable Rust panic text. It may
+also be printed on the TTY, but this file should keep it after a crash.
+
 ## Cleanup Checklist
 
 When the freeze issue is solved and the diagnostics are no longer needed:
@@ -132,16 +163,18 @@ When the freeze issue is solved and the diagnostics are no longer needed:
 1. Delete `src/diagnostics.rs`.
 2. Remove `mod diagnostics;` from `src/main.rs`.
 3. Remove startup, event-loop, and heartbeat calls from `src/main.rs`.
-4. Remove `use driftwm::window_ext::WindowExt;` from `src/main.rs` if it is only
+4. Remove the panic hook from `src/main.rs` if no longer needed.
+5. Remove `crate::diagnostics::log(...)` calls from `src/xwayland.rs`.
+6. Remove `use driftwm::window_ext::WindowExt;` from `src/main.rs` if it is only
    used by the heartbeat.
-5. Remove `crate::diagnostics::log(...)` calls from:
+7. Remove `crate::diagnostics::log(...)` calls from:
    `src/handlers/xdg_shell.rs`, `src/handlers/compositor.rs`,
    `src/grabs/move_grab.rs`, and `src/state/tile.rs`.
-6. Remove `use std::time::Instant;` from `src/state/tile.rs` if timing is no
+8. Remove `use std::time::Instant;` from `src/state/tile.rs` if timing is no
    longer used.
-7. Delete or ignore the persistent log file:
+9. Delete or ignore the persistent log file:
    `/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log`.
-8. Run `cargo fmt` and `cargo check`.
+10. Run `cargo fmt` and `cargo check`.
 
 ## Notes
 
