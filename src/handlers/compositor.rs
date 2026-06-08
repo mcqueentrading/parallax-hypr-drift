@@ -360,7 +360,7 @@ impl CompositorHandler for DriftWm {
                         // centering doesn't override that.
                         // Rule coords are window-center, Y-up; negate Y for
                         // internal canvas coords.
-                        let pos = if let Some(ref applied) = applied
+                        let mut pos = if let Some(ref applied) = applied
                             && let Some((x, y)) = applied.position
                         {
                             (x - geo.size.w / 2, -y - geo.size.h / 2)
@@ -422,9 +422,18 @@ impl CompositorHandler for DriftWm {
                             self.cascade_position(placed, &window)
                         };
                         let activate = applied.as_ref().is_none_or(|a| !a.widget);
+                        let mut spawn_workspace = None;
+                        if activate
+                            && self.in_workspace_perspective()
+                            && let Some((workspace_id, tile_loc)) =
+                                self.prepare_new_tiled_window_spawn(&window)
+                        {
+                            pos = (tile_loc.x, tile_loc.y);
+                            spawn_workspace = Some(workspace_id);
+                        }
                         self.space.map_element(window.clone(), pos, activate);
                         crate::diagnostics::log(format!(
-                            "compositor:first_map surface={:?} pos=({},{}) activate={} perspective={} zoom={:.3}",
+                            "compositor:first_map surface={:?} pos=({},{}) activate={} perspective={} zoom={:.3} spawn_workspace={spawn_workspace:?}",
                             root.id(),
                             pos.0,
                             pos.1,
@@ -432,7 +441,10 @@ impl CompositorHandler for DriftWm {
                             self.in_workspace_perspective(),
                             self.zoom()
                         ));
-                        if self.in_workspace_perspective() {
+                        if let Some(workspace_id) = spawn_workspace {
+                            self.tile_workspace_for_new_spawn(workspace_id);
+                            self.stabilize_tiled_workspace_view();
+                        } else if self.in_workspace_perspective() {
                             self.tile_windows();
                             self.stabilize_tiled_workspace_view();
                         } else {

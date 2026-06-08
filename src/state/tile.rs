@@ -484,6 +484,36 @@ impl DriftWm {
         )
     }
 
+    pub fn prepare_new_tiled_window_spawn(
+        &mut self,
+        window: &Window,
+    ) -> Option<(WorkspaceId, Point<i32, Logical>)> {
+        if !self.in_workspace_perspective() || !self.is_tiling_candidate(window) {
+            return None;
+        }
+        let id = Self::window_object_id(window)?;
+        let anchor_workspace = self
+            .pending_tile_anchors
+            .get(&id)
+            .and_then(|anchor_id| self.workspace_for_window_id(anchor_id));
+        let workspace_id = anchor_workspace
+            .or_else(|| self.workspace_at_pointer())
+            .unwrap_or(self.active_workspace);
+        let tile_area = self.workspace_tile_area(workspace_id);
+
+        self.assign_window_to_workspace(id.clone(), workspace_id);
+        self.active_workspace = workspace_id;
+        crate::diagnostics::log(format!(
+            "tile:new_spawn id={id:?} workspace={workspace_id} loc=({}, {}) anchor_workspace={anchor_workspace:?}",
+            tile_area.loc.x, tile_area.loc.y
+        ));
+        Some((workspace_id, tile_area.loc))
+    }
+
+    pub fn tile_workspace_for_new_spawn(&mut self, workspace_id: WorkspaceId) {
+        self.tile_workspace(workspace_id, false);
+    }
+
     pub fn stabilize_tiled_workspace_view(&mut self) {
         self.set_camera_target(None);
         self.set_zoom_target(None);
