@@ -44,6 +44,7 @@ use crate::backend::gamma::{GammaProps, set_gamma_for_crtc_legacy};
 use crate::render::OutputRenderElements;
 use crate::state::{DriftWm, init_output_state};
 use driftwm::config::{OutputMode as ConfigOutputMode, OutputPosition};
+use driftwm::window_ext::WindowExt;
 use smithay::wayland::seat::WaylandFocus;
 
 const SUPPORTED_COLOR_FORMATS: &[Fourcc] = &[
@@ -1340,6 +1341,7 @@ fn render_frame(
     output: &Output,
     crtc: crtc::Handle,
 ) {
+    let render_started = std::time::Instant::now();
     #[cfg(feature = "profile-with-tracy")]
     let _span = tracy_client::span!("udev::render_frame");
 
@@ -1530,6 +1532,25 @@ fn render_frame(
     data.display_handle.flush_clients().ok();
     #[cfg(feature = "profile-with-tracy")]
     drop(_post_span);
+
+    let elapsed = render_started.elapsed();
+    if elapsed >= Duration::from_millis(32) {
+        let windows = data.space.elements().filter(|w| !w.is_widget()).count();
+        let x11_windows = data
+            .space
+            .elements()
+            .filter(|w| w.x11_surface().is_some())
+            .count();
+        crate::diagnostics::log(format!(
+            "render:slow_frame output={} elapsed_ms={} windows={} x11_windows={} redraws_pending={} frames_pending={}",
+            output.name(),
+            elapsed.as_millis(),
+            windows,
+            x11_windows,
+            data.redraws_needed.len(),
+            data.frames_pending.len()
+        ));
+    }
 
     #[cfg(feature = "profile-with-tracy")]
     {

@@ -128,23 +128,20 @@ impl XwmHandler for DriftWm {
         &mut self,
         _xwm: XwmId,
         surface: X11Surface,
-        x: Option<i32>,
-        y: Option<i32>,
+        _x: Option<i32>,
+        _y: Option<i32>,
         w: Option<u32>,
         h: Option<u32>,
         _reorder: Option<Reorder>,
     ) {
         crate::diagnostics::log(format!(
-            "x11:configure_request {} x={x:?} y={y:?} w={w:?} h={h:?}",
+            "x11:configure_request {} x_ignored={_x:?} y_ignored={_y:?} w={w:?} h={h:?}",
             Self::describe_x11(&surface)
         ));
         let mut geo = surface.geometry();
-        if let Some(x) = x {
-            geo.loc.x = x;
-        }
-        if let Some(y) = y {
-            geo.loc.y = y;
-        }
+        // Match Smithay Anvil/Hyprland behaviour: clients may request a new
+        // size, but the compositor owns placement. Accepting X/Y lets X11 apps
+        // fight the infinite-canvas camera and can create sluggish movement.
         if let Some(w) = w {
             geo.size.w = w as i32;
         }

@@ -306,10 +306,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.run(None, &mut data, |data| {
         diagnostics::heartbeat(|| {
             let windows = data.space.elements().filter(|w| !w.is_widget()).count();
+            let x11_windows = data
+                .space
+                .elements()
+                .filter(|w| w.x11_surface().is_some())
+                .count();
             let camera = data.camera();
             format!(
-                "heartbeat windows={} active_ws={} zoom={:.3} camera=({:.1},{:.1}) floating={} focus_history={}",
+                "heartbeat windows={} x11_windows={} active_ws={} zoom={:.3} camera=({:.1},{:.1}) floating={} focus_history={}",
                 windows,
+                x11_windows,
                 data.active_workspace,
                 data.zoom(),
                 camera.x,

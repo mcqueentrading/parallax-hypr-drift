@@ -69,7 +69,8 @@ startup: driftwm diagnostics online ...
 startup:xwayland_setup_begin
 startup:xwayland_setup_done
 event_loop:start ...
-heartbeat windows=... active_ws=... zoom=... camera=(...) floating=... focus_history=...
+heartbeat windows=... x11_windows=... active_ws=... zoom=... camera=(...) floating=... focus_history=...
+render:slow_frame output=... elapsed_ms=... windows=... x11_windows=... redraws_pending=... frames_pending=...
 ```
 
 Panic capture:
@@ -160,6 +161,10 @@ signal:received SIGHUP
 If heartbeat stops at the freeze time, the compositor event loop or full machine
 likely stopped.
 
+If `render:slow_frame` appears repeatedly with X11 windows present, the
+choppiness is in render/composition or XWayland frame pacing rather than the
+tiler.
+
 If heartbeat continues while the UI appears frozen, the issue is more likely in
 rendering, input routing, focus, or window damage rather than total event-loop
 death.
@@ -182,6 +187,10 @@ If the last events are `x11:*`, focus on native XWayland window lifecycle.
 Steam and other X11 apps are temporarily kept out of forced tiling while this is
 stabilised, because configure/unmap storms can cause black/grey windows,
 slow animation, or lockups.
+
+`x11:configure_request` intentionally logs `x_ignored` and `y_ignored`: X11
+clients can request size changes, but compositor-owned placement should not let
+Steam/Wine fight the infinite canvas.
 
 If the last event is `panic:*`, that is the actionable Rust panic text. It may
 also be printed on the TTY, but this file should keep it after a crash.
