@@ -75,9 +75,11 @@ impl XwmHandler for DriftWm {
             pos.y,
             Self::x11_should_float(&surface)
         ));
-        if self.in_workspace_perspective() && !Self::x11_should_float(&surface) {
+        if !Self::x11_should_float(&surface) {
             self.tile_windows();
-            self.stabilize_tiled_workspace_view();
+            if self.in_workspace_perspective() {
+                self.stabilize_tiled_workspace_view();
+            }
         } else {
             self.mark_all_dirty();
         }

@@ -190,7 +190,11 @@ impl DriftWm {
         if window.x11_surface().is_some() && Self::x11_window_should_float(window) {
             return false;
         }
-        if window.is_widget() || window.parent_surface().is_some() || window.is_modal() {
+        // A raw XDG parent alone is not enough to float. GTK/GNOME apps can
+        // expose parent metadata on normal toplevels; modal/dialog intent is
+        // handled separately by is_modal(), while X11 transients still use the
+        // stricter X11 float path above.
+        if window.is_widget() || window.is_modal() {
             return false;
         }
         if self.fullscreen.values().any(|fs| fs.window == *window) {
@@ -416,15 +420,12 @@ impl DriftWm {
     }
 
     pub fn tile_current_workspace_windows(&mut self) {
-        self.sync_active_workspace_from_pointer();
-        let workspace_id = self.active_workspace;
-        if !self.in_workspace_perspective() {
-            crate::diagnostics::log(format!(
-                "tile:current_workspace_skip workspace={workspace_id} reason=not_workspace_perspective zoom={:.3}",
-                self.zoom()
-            ));
-            return;
+        if let Some(workspace_id) = self.workspace_at_pointer() {
+            self.active_workspace = workspace_id;
+        } else {
+            self.sync_active_workspace_from_pointer();
         }
+        let workspace_id = self.active_workspace;
         crate::diagnostics::log(format!(
             "tile:current_workspace_begin workspace={workspace_id} perspective={} zoom={:.3}",
             self.in_workspace_perspective(),
@@ -495,7 +496,16 @@ impl DriftWm {
         &mut self,
         window: &Window,
     ) -> Option<(WorkspaceId, Point<i32, Logical>)> {
-        if !self.in_workspace_perspective() || !self.is_tiling_candidate(window) {
+        if !self.is_tiling_candidate(window) {
+            crate::diagnostics::log(format!(
+                "tile:new_spawn_skip candidate=false app={:?} title={:?} parent={} modal={} widget={} x11={}",
+                window.app_id_or_class(),
+                window.window_title(),
+                window.parent_surface().is_some(),
+                window.is_modal(),
+                window.is_widget(),
+                window.x11_surface().is_some()
+            ));
             return None;
         }
         let id = Self::window_object_id(window)?;
@@ -503,9 +513,11 @@ impl DriftWm {
             .pending_tile_anchors
             .get(&id)
             .and_then(|anchor_id| self.workspace_for_window_id(anchor_id));
-        let workspace_id = anchor_workspace
-            .or_else(|| self.workspace_at_pointer())
-            .unwrap_or(self.active_workspace);
+        let pointer_workspace = self.workspace_at_pointer();
+        let workspace_id = anchor_workspace.or(pointer_workspace).or_else(|| {
+            self.in_workspace_perspective()
+                .then_some(self.active_workspace)
+        })?;
         let tile_area = self.workspace_tile_area(workspace_id);
 
         self.assign_window_to_workspace(id.clone(), workspace_id);
@@ -541,30 +553,47 @@ impl DriftWm {
         self.update_output_from_camera();
     }
 
-    fn split_rect(
+    fn split_rect_for_new_window(
         rect: Rectangle<i32, Logical>,
         gap: i32,
+        pointer: Option<Point<i32, Logical>>,
     ) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
+        let pointer_in_first_half = |horizontal: bool| {
+            pointer.is_some_and(|pos| {
+                if horizontal {
+                    pos.x < rect.loc.x + rect.size.w / 2
+                } else {
+                    pos.y < rect.loc.y + rect.size.h / 2
+                }
+            })
+        };
+
         if rect.size.w >= rect.size.h {
             let first_w = ((rect.size.w - gap) / 2).max(80);
             let second_w = (rect.size.w - first_w - gap).max(80);
-            (
-                Rectangle::new(rect.loc, Size::from((first_w, rect.size.h))),
-                Rectangle::new(
-                    Point::from((rect.loc.x + first_w + gap, rect.loc.y)),
-                    Size::from((second_w, rect.size.h)),
-                ),
-            )
+            let first = Rectangle::new(rect.loc, Size::from((first_w, rect.size.h)));
+            let second = Rectangle::new(
+                Point::from((rect.loc.x + first_w + gap, rect.loc.y)),
+                Size::from((second_w, rect.size.h)),
+            );
+            if pointer_in_first_half(true) {
+                (second, first)
+            } else {
+                (first, second)
+            }
         } else {
             let first_h = ((rect.size.h - gap) / 2).max(80);
             let second_h = (rect.size.h - first_h - gap).max(80);
-            (
-                Rectangle::new(rect.loc, Size::from((rect.size.w, first_h))),
-                Rectangle::new(
-                    Point::from((rect.loc.x, rect.loc.y + first_h + gap)),
-                    Size::from((rect.size.w, second_h)),
-                ),
-            )
+            let first = Rectangle::new(rect.loc, Size::from((rect.size.w, first_h)));
+            let second = Rectangle::new(
+                Point::from((rect.loc.x, rect.loc.y + first_h + gap)),
+                Size::from((rect.size.w, second_h)),
+            );
+            if pointer_in_first_half(false) {
+                (second, first)
+            } else {
+                (first, second)
+            }
         }
     }
 
@@ -613,10 +642,17 @@ impl DriftWm {
     }
 
     pub fn tile_windows(&mut self) {
-        if !self.in_workspace_perspective() {
+        if let Some(workspace_id) = self.workspace_at_pointer() {
+            self.active_workspace = workspace_id;
+        } else if !self.in_workspace_perspective() {
+            crate::diagnostics::log(format!(
+                "tile:workspace_skip reason=no_pointer_workspace zoom={:.3}",
+                self.zoom()
+            ));
             return;
+        } else {
+            self.sync_active_workspace_from_pointer();
         }
-        self.sync_active_workspace_from_pointer();
         self.tile_workspace(self.active_workspace, true);
     }
 
@@ -759,7 +795,12 @@ impl DriftWm {
                 continue;
             };
 
-            let (anchor_new_rect, new_rect) = Self::split_rect(anchor_rect, gap);
+            let pointer = self
+                .seat
+                .get_pointer()
+                .map(|pointer| pointer.current_location().to_i32_round::<i32>());
+            let (anchor_new_rect, new_rect) =
+                Self::split_rect_for_new_window(anchor_rect, gap, pointer);
             next_tile_rects.insert(anchor_id, anchor_new_rect);
             next_tile_rects.insert(new_id, new_rect);
         }

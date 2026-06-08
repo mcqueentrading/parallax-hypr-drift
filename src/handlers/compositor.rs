@@ -424,7 +424,6 @@ impl CompositorHandler for DriftWm {
                         let activate = applied.as_ref().is_none_or(|a| !a.widget);
                         let mut spawn_workspace = None;
                         if activate
-                            && self.in_workspace_perspective()
                             && let Some((workspace_id, tile_loc)) =
                                 self.prepare_new_tiled_window_spawn(&window)
                         {
@@ -443,7 +442,9 @@ impl CompositorHandler for DriftWm {
                         ));
                         if let Some(workspace_id) = spawn_workspace {
                             self.tile_workspace_for_new_spawn(workspace_id);
-                            self.stabilize_tiled_workspace_view();
+                            if self.in_workspace_perspective() {
+                                self.stabilize_tiled_workspace_view();
+                            }
                         } else if self.in_workspace_perspective() {
                             self.tile_windows();
                             self.stabilize_tiled_workspace_view();
