@@ -5,7 +5,7 @@ use smithay::{
 
 use crate::state::{DriftWm, FocusTarget, HomeReturn};
 use driftwm::canvas::{self};
-use driftwm::config::Action;
+use driftwm::config::{Action, OutputViewMode};
 use driftwm::window_ext::WindowExt;
 
 /// Use the focused window as the cone-search origin only when it's fully
@@ -297,6 +297,18 @@ impl DriftWm {
                     }
                 }
             }
+            Action::WorkspaceOverviewToggle => {
+                if self.try_restore_overview() {
+                    crate::diagnostics::log("overview:six_workspace restore=true");
+                    // toggled back
+                } else if let Some(bbox) = self.workspace_overview_bbox() {
+                    crate::diagnostics::log(format!(
+                        "overview:six_workspace restore=false bbox=({}, {}) {}x{}",
+                        bbox.loc.x, bbox.loc.y, bbox.size.w, bbox.size.h
+                    ));
+                    self.fit_to_bbox(bbox);
+                }
+            }
             Action::GoToPosition(x, y) => {
                 let vc = self.usable_center_screen();
                 let zoom = self.zoom();
@@ -417,6 +429,21 @@ impl DriftWm {
                     self.raise_and_focus(&window, serial);
                 }
             }
+            Action::ToggleOutputMirror => {
+                self.config.output_view_mode = match self.config.output_view_mode {
+                    OutputViewMode::Independent => {
+                        crate::diagnostics::log("output:view_mode mirror");
+                        OutputViewMode::Mirror
+                    }
+                    OutputViewMode::Mirror => {
+                        crate::diagnostics::log("output:view_mode independent");
+                        OutputViewMode::Independent
+                    }
+                };
+                if self.config.output_view_mode == OutputViewMode::Mirror {
+                    self.mirror_active_output_view();
+                }
+            }
             Action::ReloadConfig => {
                 self.reload_config();
             }
@@ -424,6 +451,10 @@ impl DriftWm {
                 tracing::info!("Quit action triggered — stopping compositor");
                 self.loop_signal.stop();
             }
+        }
+
+        if self.config.output_view_mode == OutputViewMode::Mirror {
+            self.mirror_active_output_view();
         }
     }
 
@@ -458,6 +489,16 @@ impl DriftWm {
         self.set_zoom_animation_center(Some(Point::from((bbox_cx, bbox_cy))));
         self.set_camera_target(Some(new_camera));
         self.set_zoom_target(Some(fit_zoom));
+    }
+
+    fn workspace_overview_bbox(
+        &self,
+    ) -> Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>> {
+        canvas::all_windows_bbox(
+            self.workspaces
+                .values()
+                .map(|workspace| (workspace.rect.loc, workspace.rect.size)),
+        )
     }
 
     /// Animate zoom to `target_zoom`, anchored on viewport center (for keyboard actions).

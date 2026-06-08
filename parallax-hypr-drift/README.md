@@ -105,7 +105,9 @@ chmod +x ~/.local/bin/start-parallax-hypr-drift
 - `SUPER+G` - open Google Chrome.
 - `SUPER+F` - toggle fullscreen.
 - `SUPER+V` - toggle focused window floating/tiled.
-- `SUPER+W` - zoom to fit all windows.
+- `SUPER+O` - toggle six-workspace overview / previous position.
+- `SUPER+Ctrl+M` - toggle independent/mirrored monitor viewports.
+- `SUPER+W` - zoom to fit current windows.
 - `SUPER+Left Click` - move floating window.
 - `SUPER+Right Click` - resize floating window.
 - `Print` / `SUPER+P` - full screenshot.

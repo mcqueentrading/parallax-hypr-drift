@@ -97,6 +97,7 @@ pub struct Config {
     pub inactive_cursor_opacity: f64,
     pub decorations: DecorationConfig,
     pub output_outline: OutputOutlineSettings,
+    pub output_view_mode: OutputViewMode,
     pub nav_anchors: Vec<Point<f64, Logical>>,
     pub backend: BackendConfig,
     pub effects: EffectsConfig,
@@ -473,6 +474,26 @@ impl Config {
             configs
         };
 
+        let output_view_mode = match raw
+            .output
+            .view_mode
+            .as_deref()
+            .unwrap_or("independent")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "independent" | "separate" | "per-output" | "per-monitor" => {
+                OutputViewMode::Independent
+            }
+            "mirror" | "mirrored" => OutputViewMode::Mirror,
+            other => {
+                tracing::warn!(
+                    "Bad [output] view_mode '{other}', expected 'independent' or 'mirror'; using independent"
+                );
+                OutputViewMode::Independent
+            }
+        };
+
         let effects = parse_effects_config(raw.effects);
         let backend = parse_backend_config(raw.backend);
 
@@ -570,6 +591,7 @@ impl Config {
             cursor_size: raw.cursor.size,
             inactive_cursor_opacity: raw.cursor.inactive_opacity.unwrap_or(0.5).clamp(0.0, 1.0),
             output_outline: parse_output_outline(raw.output.outline.unwrap_or_default()),
+            output_view_mode,
             nav_anchors: raw
                 .navigation
                 .anchors

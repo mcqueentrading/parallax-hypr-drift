@@ -109,6 +109,12 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
             }
         }
         "home-toggle" => Ok(Action::HomeToggle),
+        "workspace-overview-toggle" | "workspace-overview" | "six-workspace-overview" => {
+            Ok(Action::WorkspaceOverviewToggle)
+        }
+        "toggle-output-mirror" | "output-mirror-toggle" | "mirror-outputs" => {
+            Ok(Action::ToggleOutputMirror)
+        }
         "go-to" => {
             let arg = arg.ok_or("go-to requires <x> <y> coordinates")?;
             let parts: Vec<&str> = arg.split_whitespace().collect();
@@ -285,6 +291,7 @@ fn parse_threshold_action(s: &str) -> Result<Option<ThresholdAction>, String> {
         "center-window"
         | "focus-center"
         | "home-toggle"
+        | "workspace-overview-toggle"
         | "zoom-to-fit"
         | "zoom-to-fit-snapped"
         | "zoom-in"

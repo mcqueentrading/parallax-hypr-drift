@@ -130,9 +130,11 @@ should change the view, not destroy or reorder the user's windows.
 | `Mod+1` .. `Mod+6` | Jump camera to workspace zone |
 | `Mod+Shift+1` .. `Mod+Shift+6` | Move hovered/focused window to zone and retile |
 | `Mod+A` | Toggle between workspace 1 and previous canvas position |
+| `Mod+O` | Toggle between six-workspace overview and previous canvas position |
+| `Mod+Ctrl+M` | Toggle independent/mirrored monitor viewports |
 | `Mod+V` | Toggle focused window floating/tiled |
 | `Mod+T` | Force current workspace back into tiling |
-| `Mod+W` | Zoom out / overview |
+| `Mod+W` | Zoom to fit current windows |
 | `Mod+Q` / `Mod+Return` | Launch terminal in the example config |
 | `Mod+C` | Close focused window in the example config |
 | `Print` / `Mod+P` | Full screenshot in the example config |
@@ -143,6 +145,18 @@ Public example config:
 ```text
 parallax-hypr-drift/config.toml
 ```
+
+## Multi-Monitor Canvas
+
+External monitors look at the same infinite canvas. By default each physical
+monitor has its own viewport, so if the pointer is on monitor 1 then `Mod+2`
+moves only monitor 1 to workspace 2; if the pointer is on monitor 2 then
+`Mod+4` moves only monitor 2 to workspace 4.
+
+Monitor placement follows the configured output layout, similar to Hyprland's
+monitor positions. Use `[[outputs]] position = [x, y]` to decide how the pointer
+crosses between screens. `Mod+Ctrl+M` toggles mirror mode, where all connected
+monitors follow the active monitor's camera and zoom.
 
 ## What Makes It Different
 

@@ -27,6 +27,9 @@ break_force = 44.0
 same_edge = false
 edge_center = true
 
+[output]
+view_mode = "independent"
+
 [background]
 type = "shader"
 # Update this path after copying the shader to your config directory.
@@ -42,6 +45,8 @@ default_mode = "minimal"
 "mod+g" = "exec google-chrome-stable"
 "mod+f" = "toggle-fullscreen"
 "mod+v" = "toggle-floating"
+"mod+o" = "workspace-overview-toggle"
+"mod+ctrl+m" = "toggle-output-mirror"
 "mod+w" = "zoom-to-fit"
 "mod+equal" = "zoom-in"
 "mod+minus" = "zoom-out"

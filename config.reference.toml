@@ -181,6 +181,8 @@
 [output]
 # Global output settings. Per-output scale/transform/mode/position
 # are configured in [[outputs]] sections below.
+# view_mode = "independent"  # "independent" = each monitor has its own camera;
+                             # "mirror" = all monitors follow the active output view.
 
 [output.outline]
 # color = "#ffffff"           # outline color for other monitors' viewports
@@ -236,7 +238,8 @@
 #   center-nearest <dir>    — navigate to nearest window in direction
 #   cycle-windows forward   — Alt-Tab style window cycling
 #   cycle-windows backward  — reverse cycle
-#   home-toggle             — toggle between current position and origin
+#   home-toggle             — toggle between current position and workspace 1
+#   workspace-overview-toggle — toggle between current position and all six workspace zones
 #   zoom-in / zoom-out      — step zoom
 #   zoom-reset              — zoom to 1.0
 #   go-to <x> <y>           — jump camera to canvas position (bookmarks, Y-up)
@@ -247,6 +250,7 @@
 #   reload-config           — hot-reload config file
 #   quit                    — exit the compositor
 #   send-to-output <dir>    — move focused window to adjacent output
+#   toggle-output-mirror    — toggle independent/mirrored monitor viewports
 #   none                    — unbind this key combo
 #
 # Directions: up, down, left, right, up-left, up-right, down-left, down-right
@@ -258,6 +262,7 @@
 # "mod+f" = "toggle-fullscreen"
 # "mod+m" = "fit-window"
 # "mod+shift+m" = "fit-window-snapped"
+# "mod+ctrl+m" = "toggle-output-mirror"
 # "mod+c" = "center-window"
 # "mod+x" = "focus-center"
 # "mod+a" = "home-toggle"
@@ -279,6 +284,7 @@
 # "mod+minus" = "zoom-out"
 # "mod+0" = "zoom-reset"
 # "mod+z" = "zoom-reset"
+# "mod+o" = "workspace-overview-toggle"
 # "mod+w" = "zoom-to-fit"
 # "mod+shift+w" = "zoom-to-fit-snapped"
 # "mod+1" = "go-to -1750 1750"     # top-left bookmark

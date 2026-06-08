@@ -364,6 +364,10 @@ impl DriftWm {
             self.tick_camera_animation_on(output, is_active, dt);
         }
 
+        if self.config.output_view_mode == driftwm::config::OutputViewMode::Mirror {
+            self.mirror_active_output_view();
+        }
+
         // Single camera sync after all outputs are ticked (avoids N×M redundancy)
         self.update_output_from_camera();
     }

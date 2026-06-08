@@ -418,6 +418,13 @@ impl DriftWm {
     pub fn tile_current_workspace_windows(&mut self) {
         self.sync_active_workspace_from_pointer();
         let workspace_id = self.active_workspace;
+        if !self.in_workspace_perspective() {
+            crate::diagnostics::log(format!(
+                "tile:current_workspace_skip workspace={workspace_id} reason=not_workspace_perspective zoom={:.3}",
+                self.zoom()
+            ));
+            return;
+        }
         crate::diagnostics::log(format!(
             "tile:current_workspace_begin workspace={workspace_id} perspective={} zoom={:.3}",
             self.in_workspace_perspective(),

@@ -1030,6 +1030,30 @@ impl DriftWm {
         }
     }
 
+    /// Mirror the active output's canvas viewport to every connected output.
+    /// Layout positions stay per-monitor so pointer crossing still follows the
+    /// physical monitor arrangement.
+    pub fn mirror_active_output_view(&mut self) {
+        let Some(active) = self.active_output() else {
+            return;
+        };
+        let source = output_state(&active).clone();
+        for output in self.space.outputs().cloned().collect::<Vec<_>>() {
+            if output == active {
+                continue;
+            }
+            let mut os = output_state(&output);
+            os.camera = source.camera;
+            os.zoom = source.zoom;
+            os.zoom_target = source.zoom_target;
+            os.zoom_animation_center = source.zoom_animation_center;
+            os.overview_return = source.overview_return;
+            os.camera_target = source.camera_target;
+            os.home_return = source.home_return.clone();
+        }
+        self.update_output_from_camera();
+    }
+
     /// Sync each output's position to its camera so render_output
     /// applies the canvas→screen transform.
     pub fn update_output_from_camera(&mut self) {

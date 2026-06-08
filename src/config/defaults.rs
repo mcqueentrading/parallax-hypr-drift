@@ -99,7 +99,7 @@ pub(super) fn default_bindings(
         ),
         (
             KeyCombo {
-                modifiers: m_ctrl,
+                modifiers: m_ctrl.clone(),
                 sym: Keysym::from(keysyms::KEY_Right),
             },
             Action::PanViewport(Direction::Right),
@@ -110,6 +110,13 @@ pub(super) fn default_bindings(
                 sym: Keysym::from(keysyms::KEY_a),
             },
             Action::HomeToggle,
+        ),
+        (
+            KeyCombo {
+                modifiers: m.clone(),
+                sym: Keysym::from(keysyms::KEY_o),
+            },
+            Action::WorkspaceOverviewToggle,
         ),
         (
             KeyCombo {
@@ -327,6 +334,13 @@ pub(super) fn default_bindings(
                 sym: Keysym::from(keysyms::KEY_m),
             },
             Action::FitWindowSnapped,
+        ),
+        (
+            KeyCombo {
+                modifiers: m_ctrl.clone(),
+                sym: Keysym::from(keysyms::KEY_m),
+            },
+            Action::ToggleOutputMirror,
         ),
         (
             KeyCombo {

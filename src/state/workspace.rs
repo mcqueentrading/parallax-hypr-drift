@@ -145,13 +145,23 @@ impl DriftWm {
         self.active_workspace = id;
 
         let vc = self.usable_center_screen();
-        let zoom = self.zoom();
+        let target_zoom = 1.0;
         let center = Point::<f64, Logical>::from((
             workspace.rect.loc.x as f64 + workspace.rect.size.w as f64 / 2.0,
             workspace.rect.loc.y as f64 + workspace.rect.size.h as f64 / 2.0,
         ));
-        let target_camera = Point::from((center.x - vc.x / zoom, center.y - vc.y / zoom));
+        let target_camera =
+            Point::from((center.x - vc.x / target_zoom, center.y - vc.y / target_zoom));
         self.set_overview_return(None);
+        self.with_output_state(|os| {
+            os.home_return = None;
+        });
+        self.set_zoom_animation_center(Some(center));
         self.set_camera_target(Some(target_camera));
+        self.set_zoom_target(Some(target_zoom));
+        crate::diagnostics::log(format!(
+            "workspace:activate id={id} camera=({:.1},{:.1}) zoom={target_zoom:.3}",
+            target_camera.x, target_camera.y
+        ));
     }
 }

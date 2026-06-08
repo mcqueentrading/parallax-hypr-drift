@@ -48,6 +48,7 @@ pub enum Action {
     CenterNearest(Direction),
     CycleWindows { backward: bool },
     HomeToggle,
+    WorkspaceOverviewToggle,
     GoToPosition(f64, f64),
     GoToWorkspace(u8),
     MoveWindowToWorkspace(u8),
@@ -62,6 +63,7 @@ pub enum Action {
     ToggleFloating,
     TileCurrentWorkspace,
     SendToOutput(Direction),
+    ToggleOutputMirror,
     FocusCenter,
     ReloadConfig,
     Quit,
@@ -131,6 +133,15 @@ pub enum WindowPlacement {
     /// Force normal top-level windows into a simple viewport grid. Windows
     /// toggled floating are excluded from the grid.
     Tile,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OutputViewMode {
+    /// Each physical monitor has its own camera/zoom into the shared canvas.
+    #[default]
+    Independent,
+    /// All physical monitors mirror the active monitor's camera/zoom.
+    Mirror,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

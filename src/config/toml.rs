@@ -150,6 +150,7 @@ pub(super) struct SnapConfig {
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct OutputConfig {
+    pub view_mode: Option<String>,
     pub outline: Option<OutputOutlineConfig>,
 }
 
