@@ -386,7 +386,7 @@ impl XdgShellHandler for DriftWm {
                 }
             }
             self.space.unmap_elem(window);
-            self.retile_after_window_unmap(old_workspace);
+            self.retile_after_window_unmap(old_workspace.clone());
             crate::diagnostics::log(format!(
                 "xdg:unmap_done surface={:?} old_workspace={:?}",
                 wl_surface.id(),

@@ -7,6 +7,12 @@ use std::time::Instant;
 
 use super::{DriftWm, FocusTarget, WorkspaceId};
 
+#[derive(Clone, Debug)]
+pub struct TiledUnmapState {
+    workspace_id: WorkspaceId,
+    removed_rect: Option<Rectangle<i32, Logical>>,
+}
+
 impl DriftWm {
     fn window_object_id(window: &Window) -> Option<ObjectId> {
         window.wl_surface().map(|surface| surface.id())
@@ -33,6 +39,117 @@ impl DriftWm {
                 workspace.windows.remove(id);
             }
         }
+    }
+
+    fn apply_workspace_tile_rects(&mut self, workspace_id: WorkspaceId) {
+        let Some(workspace) = self.workspaces.get(&workspace_id) else {
+            return;
+        };
+        let tile_rects = workspace.tile_rects.clone();
+        if tile_rects.is_empty() {
+            return;
+        }
+
+        let windows: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|window| self.is_tiling_candidate(window))
+            .filter(|window| {
+                Self::window_object_id(window)
+                    .as_ref()
+                    .is_some_and(|id| tile_rects.contains_key(id))
+            })
+            .cloned()
+            .collect();
+
+        let mut configured = 0usize;
+        let mut remapped = 0usize;
+        for window in &windows {
+            let Some(id) = Self::window_object_id(window) else {
+                continue;
+            };
+            let Some(rect) = tile_rects.get(&id).cloned() else {
+                continue;
+            };
+            let already_tiled = self.space.element_location(window) == Some(rect.loc)
+                && window.geometry().size == rect.size;
+
+            if let Some(toplevel) = window.toplevel() {
+                crate::handlers::set_tiled_states(&toplevel);
+                if !already_tiled {
+                    toplevel.with_pending_state(|state| {
+                        state.size = Some(rect.size);
+                    });
+                    toplevel.send_configure();
+                    configured += 1;
+                }
+            }
+            if !already_tiled {
+                self.space.map_element(window.clone(), rect.loc, false);
+                remapped += 1;
+            }
+        }
+        self.sync_pointer_focus_under_cursor();
+        self.mark_all_dirty();
+        crate::diagnostics::log(format!(
+            "tile:apply_existing workspace={workspace_id} windows={} configured={configured} remapped={remapped}",
+            windows.len()
+        ));
+    }
+
+    fn merge_removed_tile_into_sibling(
+        &mut self,
+        workspace_id: WorkspaceId,
+        removed_rect: Rectangle<i32, Logical>,
+    ) -> bool {
+        let gap = self.config.snap_gap.max(0.0).round() as i32;
+        let Some(workspace) = self.workspaces.get_mut(&workspace_id) else {
+            return false;
+        };
+
+        let mut best: Option<(ObjectId, Rectangle<i32, Logical>, i32)> = None;
+        for (id, rect) in &workspace.tile_rects {
+            let horizontal_neighbor = rect.loc.y == removed_rect.loc.y
+                && rect.size.h == removed_rect.size.h
+                && (rect.loc.x + rect.size.w + gap == removed_rect.loc.x
+                    || removed_rect.loc.x + removed_rect.size.w + gap == rect.loc.x);
+            let vertical_neighbor = rect.loc.x == removed_rect.loc.x
+                && rect.size.w == removed_rect.size.w
+                && (rect.loc.y + rect.size.h + gap == removed_rect.loc.y
+                    || removed_rect.loc.y + removed_rect.size.h + gap == rect.loc.y);
+
+            if !horizontal_neighbor && !vertical_neighbor {
+                continue;
+            }
+
+            let min_x = rect.loc.x.min(removed_rect.loc.x);
+            let min_y = rect.loc.y.min(removed_rect.loc.y);
+            let max_x = (rect.loc.x + rect.size.w).max(removed_rect.loc.x + removed_rect.size.w);
+            let max_y = (rect.loc.y + rect.size.h).max(removed_rect.loc.y + removed_rect.size.h);
+            let merged = Rectangle::new(
+                Point::from((min_x, min_y)),
+                Size::from((max_x - min_x, max_y - min_y)),
+            );
+            let area = rect.size.w.saturating_mul(rect.size.h);
+            if best
+                .as_ref()
+                .is_none_or(|(_, _, best_area)| area > *best_area)
+            {
+                best = Some((id.clone(), merged, area));
+            }
+        }
+
+        let Some((sibling_id, merged, _)) = best else {
+            return false;
+        };
+
+        workspace.tile_rects.insert(sibling_id.clone(), merged);
+        self.tile_rects.insert(sibling_id.clone(), merged);
+        crate::diagnostics::log(format!(
+            "tile:merge_removed workspace={workspace_id} sibling={sibling_id:?} merged=({}, {}) {}x{}",
+            merged.loc.x, merged.loc.y, merged.size.w, merged.size.h
+        ));
+        true
     }
 
     fn workspace_for_window_id(&self, id: &ObjectId) -> Option<WorkspaceId> {
@@ -248,27 +365,47 @@ impl DriftWm {
         self.stabilize_tiled_workspace_view();
     }
 
-    pub fn prepare_tiled_window_unmap(&mut self, id: &ObjectId) -> Option<WorkspaceId> {
+    pub fn prepare_tiled_window_unmap(&mut self, id: &ObjectId) -> Option<TiledUnmapState> {
         self.floating_windows.remove(id);
         let source_workspace = self.workspace_for_window_id(id);
+        let removed_rect = source_workspace.and_then(|workspace_id| {
+            self.workspaces
+                .get(&workspace_id)
+                .and_then(|workspace| workspace.tile_rects.get(id).cloned())
+        });
         crate::diagnostics::log(format!(
-            "tile:prepare_unmap id={id:?} source={source_workspace:?}"
+            "tile:prepare_unmap id={id:?} source={source_workspace:?} rect={}",
+            removed_rect.is_some()
         ));
         self.purge_workspace_tile_state(id, true);
-        source_workspace
+        source_workspace.map(|workspace_id| TiledUnmapState {
+            workspace_id,
+            removed_rect,
+        })
     }
 
-    pub fn retile_after_window_unmap(&mut self, source_workspace: Option<WorkspaceId>) {
-        let Some(workspace_id) = source_workspace else {
+    pub fn retile_after_window_unmap(&mut self, unmap_state: Option<TiledUnmapState>) {
+        let Some(unmap_state) = unmap_state else {
             crate::diagnostics::log("tile:retile_after_unmap skip=no_workspace");
             return;
         };
+        let workspace_id = unmap_state.workspace_id;
 
         crate::diagnostics::log(format!(
             "tile:retile_after_unmap workspace={workspace_id} perspective={} active_ws={}",
             self.in_workspace_perspective(),
             self.active_workspace
         ));
+        if let Some(removed_rect) = unmap_state.removed_rect
+            && self.merge_removed_tile_into_sibling(workspace_id, removed_rect)
+        {
+            self.apply_workspace_tile_rects(workspace_id);
+            if self.in_workspace_perspective() && workspace_id == self.active_workspace {
+                self.stabilize_tiled_workspace_view();
+            }
+            return;
+        }
+
         self.tile_workspace(workspace_id, false);
         if self.in_workspace_perspective() && workspace_id == self.active_workspace {
             self.stabilize_tiled_workspace_view();
