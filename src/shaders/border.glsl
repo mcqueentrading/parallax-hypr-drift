@@ -11,6 +11,11 @@ uniform vec4 u_inner_rect;  // (x, y, w, h) of inner content rect within element
 uniform float u_inner_radius;
 uniform float u_border_width;
 uniform vec4 u_color;
+uniform vec4 u_color2;
+uniform vec4 u_color3;
+uniform vec4 u_color4;
+uniform float u_gradient_enabled;
+uniform float u_gradient_angle;
 
 float sd_rounded_box(vec2 p, vec2 half_size, float r) {
     vec2 q = abs(p) - half_size + vec2(r);
@@ -35,5 +40,14 @@ void main() {
     float a_inner = clamp(0.5 + sd_inner, 0.0, 1.0);
     float coverage = a_outer * a_inner;
 
-    gl_FragColor = u_color * coverage * alpha;
+    float r = radians(u_gradient_angle);
+    vec2 dir = vec2(cos(r), sin(r));
+    float t = dot((pixel / max(size, vec2(1.0))) - vec2(0.5), dir) + 0.5;
+    t = clamp(t, 0.0, 1.0);
+    vec4 c12 = mix(u_color, u_color2, smoothstep(0.00, 0.33, t));
+    vec4 c34 = mix(u_color3, u_color4, smoothstep(0.66, 1.00, t));
+    vec4 grad = mix(c12, c34, smoothstep(0.33, 0.66, t));
+    vec4 final_color = mix(u_color, grad, clamp(u_gradient_enabled, 0.0, 1.0));
+
+    gl_FragColor = final_color * coverage * alpha;
 }

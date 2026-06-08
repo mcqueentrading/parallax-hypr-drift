@@ -18,7 +18,12 @@ use super::types::{
 };
 
 pub(super) fn parse_color(s: &str) -> Option<[u8; 4]> {
-    let hex = s.strip_prefix('#')?;
+    let trimmed = s.trim();
+    let hex = trimmed.strip_prefix('#').or_else(|| {
+        trimmed
+            .strip_prefix("rgba(")
+            .and_then(|value| value.strip_suffix(')'))
+    })?;
     match hex.len() {
         6 => {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
@@ -117,6 +122,27 @@ pub(super) fn parse_decoration_config(raw: DecorationFileConfig) -> DecorationCo
         }
     };
 
+    let border_color_focused_gradient = raw.border_color_focused_gradient.and_then(|colors| {
+        if colors.len() != 4 {
+            tracing::warn!(
+                "border_color_focused_gradient needs exactly 4 colors, got {}; ignoring",
+                colors.len()
+            );
+            return None;
+        }
+        let mut parsed = [[0u8; 4]; 4];
+        for (idx, color) in colors.into_iter().enumerate() {
+            let Some(rgba) = parse_color(&color) else {
+                tracing::warn!(
+                    "Invalid border_color_focused_gradient[{idx}] color '{color}', ignoring gradient"
+                );
+                return None;
+            };
+            parsed[idx] = rgba;
+        }
+        Some(parsed)
+    });
+
     DecorationConfig {
         bg_color: resolve(raw.bg_color, defaults.bg_color, "bg_color"),
         fg_color: resolve(raw.fg_color, defaults.fg_color, "fg_color"),
@@ -129,6 +155,15 @@ pub(super) fn parse_decoration_config(raw: DecorationFileConfig) -> DecorationCo
             defaults.border_color_focused,
             "border_color_focused",
         ),
+        border_color_focused_gradient,
+        border_angle: raw.border_angle.unwrap_or(defaults.border_angle),
+        animate_border_angle: raw
+            .animate_border_angle
+            .unwrap_or(defaults.animate_border_angle),
+        border_animation_speed: raw
+            .border_animation_speed
+            .unwrap_or(defaults.border_animation_speed)
+            .max(0.0),
         shadow: raw.shadow.unwrap_or(defaults.shadow),
         title_bar_height: raw
             .title_bar_height

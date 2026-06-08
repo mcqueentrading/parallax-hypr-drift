@@ -44,18 +44,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
     std::panic::set_hook(Box::new(|panic_info| {
         diagnostics::log(format!("panic: {panic_info}"));
-        eprintln!("driftwm panic: {panic_info}");
+        eprintln!("hypr-drift panic: {panic_info}");
     }));
     diagnostics::log(
-        "startup: driftwm diagnostics online log=/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log",
+        "startup: hypr-drift diagnostics online log=/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log",
     );
 
     if std::env::args().any(|a| a == "--help" || a == "-h") {
         println!(
-            "driftwm {} — {}\n\
+            "hypr-drift {} — {}\n\
              \n\
              USAGE:\n    \
-                 driftwm [OPTIONS]\n\
+                 hypr-drift [OPTIONS]\n\
              \n\
              OPTIONS:\n    \
                  --backend <udev|winit>   Backend (default: udev on TTY, winit if nested)\n    \
@@ -73,19 +73,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if std::env::args().any(|a| a == "--version" || a == "-V") {
-        println!("driftwm {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-
-    if std::env::args().any(|a| a == "--check-config") {
-        let _config = driftwm::config::Config::load();
-        tracing::info!("Config OK");
+        println!("hypr-drift {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
     // --config <path>: override config file (useful for nested/test sessions).
     if let Some(path) = std::env::args().skip_while(|a| a != "--config").nth(1) {
         unsafe { std::env::set_var("DRIFTWM_CONFIG", &path) };
+    }
+
+    if std::env::args().any(|a| a == "--check-config") {
+        let _config = driftwm::config::Config::load();
+        tracing::info!("Config OK");
+        return Ok(());
     }
 
     // --backend: default udev on bare metal, winit if nested.
@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_loop: smithay::reexports::calloop::EventLoop<DriftWm> =
         smithay::reexports::calloop::EventLoop::try_new()?;
 
-    // signalfd path so SIGTERM from systemd / `pkill driftwm` goes through
+    // signalfd path so SIGTERM from systemd / `pkill hypr-drift` goes through
     // the same clean exit as the Quit keybind.
     signals::listen(&event_loop.handle());
 
@@ -154,18 +154,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Listening on WAYLAND_DISPLAY={socket_name}");
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &socket_name) };
     unsafe { std::env::set_var("XDG_SESSION_TYPE", "wayland") };
-    unsafe { std::env::set_var("XDG_CURRENT_DESKTOP", "driftwm") };
+    unsafe { std::env::set_var("XDG_CURRENT_DESKTOP", "hypr-drift") };
     unsafe { std::env::set_var("XDG_SESSION_CLASS", "user") };
-    unsafe { std::env::set_var("XDG_SESSION_DESKTOP", "driftwm") };
-    unsafe { std::env::set_var("XDG_DESKTOP_SESSION", "driftwm") };
+    unsafe { std::env::set_var("XDG_SESSION_DESKTOP", "hypr-drift") };
+    unsafe { std::env::set_var("XDG_DESKTOP_SESSION", "hypr-drift") };
 
     // Add compositor-created session vars to child_env for autostart and keybind commands.
     for (key, value) in [
         ("WAYLAND_DISPLAY", socket_name.as_str()),
-        ("XDG_CURRENT_DESKTOP", "driftwm"),
+        ("XDG_CURRENT_DESKTOP", "hypr-drift"),
         ("XDG_SESSION_TYPE", "wayland"),
-        ("XDG_SESSION_DESKTOP", "driftwm"),
-        ("XDG_DESKTOP_SESSION", "driftwm"),
+        ("XDG_SESSION_DESKTOP", "hypr-drift"),
+        ("XDG_DESKTOP_SESSION", "hypr-drift"),
         ("XDG_SESSION_CLASS", "user"),
     ] {
         data.config

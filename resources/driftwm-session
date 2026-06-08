@@ -1,7 +1,7 @@
 #!/bin/sh
-# driftwm-session — launched by display manager (e.g. GDM) instead of bare driftwm.
+# hypr-drift-session — launched by display manager instead of bare hypr-drift.
 # Re-execs through a login shell to pick up /etc/profile, ~/.profile and PAM
-# env vars, then runs driftwm.service under the user systemd manager so the
+# env vars, then runs hypr-drift.service under the user systemd manager so the
 # compositor lives in its own cgroup with proper journald logging.
 
 if [ -z "$_DRIFTWM_WRAPPER" ]; then
@@ -10,14 +10,14 @@ if [ -z "$_DRIFTWM_WRAPPER" ]; then
 fi
 
 if ! hash systemctl >/dev/null 2>&1; then
-    echo "systemctl not found; driftwm-session requires systemd user manager." >&2
-    echo "Run 'driftwm' directly instead." >&2
+    echo "systemctl not found; hypr-drift-session requires systemd user manager." >&2
+    echo "Run 'hypr-drift' directly instead." >&2
     exit 1
 fi
 
 # Refuse to start a second session on top of an existing one.
-if systemctl --user -q is-active driftwm.service; then
-    echo "A driftwm session is already running." >&2
+if systemctl --user -q is-active hypr-drift.service; then
+    echo "A hypr-drift session is already running." >&2
     exit 1
 fi
 
@@ -31,12 +31,12 @@ hash dbus-update-activation-environment 2>/dev/null && \
     dbus-update-activation-environment --all
 
 # Run the compositor as a user service and wait for it to exit. BindsTo on
-# driftwm.service brings graphical-session.target up automatically; logs land
-# in the journal (journalctl --user -u driftwm.service).
-systemctl --user --wait start driftwm.service
+# hypr-drift.service brings graphical-session.target up automatically; logs land
+# in the journal (journalctl --user -u hypr-drift.service).
+systemctl --user --wait start hypr-drift.service
 
 # Force-stop graphical-session{,-pre}.target via the shutdown target so any
 # services with PartOf=graphical-session.target are torn down cleanly.
-systemctl --user start --job-mode=replace-irreversibly driftwm-shutdown.target
+systemctl --user start --job-mode=replace-irreversibly hypr-drift-shutdown.target
 
 systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP

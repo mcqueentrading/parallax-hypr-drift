@@ -104,6 +104,8 @@ fn push_layer_chrome(
             corner_radius as f32,
             border_width,
             border_color,
+            None,
+            0.0,
             false,
             opacity,
             scale,

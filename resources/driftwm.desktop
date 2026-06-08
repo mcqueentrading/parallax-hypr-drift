@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=driftwm
-Comment=A trackpad-first infinite canvas Wayland compositor
-Exec=driftwm-session
+Name=Hypr Drift
+Comment=A Hyprland-inspired infinite canvas Wayland compositor
+Exec=hypr-drift-session
 Type=Application
-DesktopNames=driftwm;wlroots
+DesktopNames=hypr-drift;wlroots

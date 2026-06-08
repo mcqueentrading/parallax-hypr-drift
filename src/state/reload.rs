@@ -22,14 +22,15 @@ impl DriftWm {
                 return;
             }
         };
-        let mut new_config = match driftwm::config::Config::from_toml(&contents) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("Config reload: parse error: {e}");
-                self.set_error(ErrorSource::Config, format!("config error: {e}"));
-                return;
-            }
-        };
+        let mut new_config =
+            match driftwm::config::Config::from_config_contents(&config_path, &contents) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Config reload: parse error: {e}");
+                    self.set_error(ErrorSource::Config, format!("config error: {e}"));
+                    return;
+                }
+            };
 
         if new_config.keyboard_layout != self.config.keyboard_layout {
             let kb = &new_config.keyboard_layout;

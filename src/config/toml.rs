@@ -184,6 +184,10 @@ pub(super) struct DecorationFileConfig {
     pub border_width: Option<i32>,
     pub border_color: Option<String>,
     pub border_color_focused: Option<String>,
+    pub border_color_focused_gradient: Option<Vec<String>>,
+    pub border_angle: Option<f32>,
+    pub animate_border_angle: Option<bool>,
+    pub border_animation_speed: Option<f32>,
     pub shadow: Option<bool>,
     pub title_bar_height: Option<i32>,
     pub font: Option<String>,
@@ -285,7 +289,8 @@ impl Default for XwaylandConfig {
 }
 
 pub fn config_path() -> std::path::PathBuf {
-    // --config <path> sets DRIFTWM_CONFIG at startup
+    // --config <path> sets DRIFTWM_CONFIG at startup. Keep the env name for
+    // compatibility while the public compositor name moves to hypr-drift.
     if let Ok(p) = std::env::var("DRIFTWM_CONFIG") {
         return std::path::PathBuf::from(expand_tilde(&p));
     }
@@ -293,7 +298,7 @@ pub fn config_path() -> std::path::PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         format!("{home}/.config")
     });
-    std::path::PathBuf::from(config_dir).join("driftwm/config.toml")
+    std::path::PathBuf::from(config_dir).join("hypr-drift/config.lua")
 }
 
 pub fn expand_tilde(path: &str) -> String {

@@ -261,6 +261,26 @@ pub(super) const BORDER_UNIFORMS: &[UniformName<'static>] = &[
         name: Cow::Borrowed("u_color"),
         type_: UniformType::_4f,
     },
+    UniformName {
+        name: Cow::Borrowed("u_color2"),
+        type_: UniformType::_4f,
+    },
+    UniformName {
+        name: Cow::Borrowed("u_color3"),
+        type_: UniformType::_4f,
+    },
+    UniformName {
+        name: Cow::Borrowed("u_color4"),
+        type_: UniformType::_4f,
+    },
+    UniformName {
+        name: Cow::Borrowed("u_gradient_enabled"),
+        type_: UniformType::_1f,
+    },
+    UniformName {
+        name: Cow::Borrowed("u_gradient_angle"),
+        type_: UniformType::_1f,
+    },
 ];
 
 pub fn compile_border_shader(renderer: &mut GlesRenderer) -> Option<GlesPixelProgram> {
@@ -275,8 +295,8 @@ pub fn compile_border_shader(renderer: &mut GlesRenderer) -> Option<GlesPixelPro
 
 /// Key that fully determines border element identity & geometry, in post-zoom
 /// physical pixels: `[inner_x0, inner_y0, inner_x1, inner_y1, element_x, element_y,
-/// element_w, element_h, border_width, focused_flag]`.
-pub type BorderPhysKey = [i32; 10];
+/// element_w, element_h, border_width, focused_flag, angle_mdeg]`.
+pub type BorderPhysKey = [i32; 11];
 
 #[allow(clippy::too_many_arguments)]
 fn border_uniforms_precise(
@@ -287,6 +307,8 @@ fn border_uniforms_precise(
     inner_radius_phys: f32,
     border_width_phys: f32,
     color: [u8; 4],
+    gradient: Option<[[u8; 4]; 4]>,
+    gradient_angle: f32,
     focused: bool,
 ) -> (Vec<Uniform<'static>>, BorderPhysKey) {
     let zoom_scale = Scale::from(zoom);
@@ -310,6 +332,16 @@ fn border_uniforms_precise(
     let inner_r_logical = inner_radius_phys as f64 / px;
     let border_w_logical = border_width_phys as f64 / px;
 
+    let gradient_colors = gradient.unwrap_or([color, color, color, color]);
+    let rgba = |c: [u8; 4]| {
+        (
+            c[0] as f32 / 255.0,
+            c[1] as f32 / 255.0,
+            c[2] as f32 / 255.0,
+            c[3] as f32 / 255.0,
+        )
+    };
+
     let uniforms = vec![
         Uniform::new(
             "u_inner_rect",
@@ -322,15 +354,15 @@ fn border_uniforms_precise(
         ),
         Uniform::new("u_inner_radius", inner_r_logical as f32),
         Uniform::new("u_border_width", border_w_logical as f32),
+        Uniform::new("u_color", rgba(gradient_colors[0])),
+        Uniform::new("u_color2", rgba(gradient_colors[1])),
+        Uniform::new("u_color3", rgba(gradient_colors[2])),
+        Uniform::new("u_color4", rgba(gradient_colors[3])),
         Uniform::new(
-            "u_color",
-            (
-                color[0] as f32 / 255.0,
-                color[1] as f32 / 255.0,
-                color[2] as f32 / 255.0,
-                color[3] as f32 / 255.0,
-            ),
+            "u_gradient_enabled",
+            if gradient.is_some() { 1.0f32 } else { 0.0f32 },
         ),
+        Uniform::new("u_gradient_angle", gradient_angle),
     ];
 
     let key: BorderPhysKey = [
@@ -344,6 +376,7 @@ fn border_uniforms_precise(
         border_post.size.h,
         border_width_phys.round() as i32,
         focused as i32,
+        (gradient_angle * 1000.0).round() as i32,
     ];
 
     (uniforms, key)
@@ -366,6 +399,8 @@ pub(super) fn push_border_element(
     inner_radius_logical: f32,
     border_width_logical: i32,
     color: [u8; 4],
+    gradient: Option<[[u8; 4]; 4]>,
+    gradient_angle: f32,
     focused: bool,
     opacity: f64,
     output_scale: Scale<f64>,
@@ -407,6 +442,8 @@ pub(super) fn push_border_element(
         inner_r_phys,
         border_w_phys,
         color,
+        gradient,
+        gradient_angle,
         focused,
     );
 

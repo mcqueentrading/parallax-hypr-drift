@@ -51,6 +51,8 @@ Current call sites:
 
 ```text
 src/main.rs
+src/config/lua.rs
+src/config/mod.rs
 src/xwayland.rs
 src/signals.rs
 src/handlers/x11.rs
@@ -72,6 +74,25 @@ event_loop:start ...
 heartbeat windows=... x11_windows=... active_ws=... zoom=... camera=(...) floating=... focus_history=...
 render:slow_frame output=... elapsed_ms=... windows=... x11_windows=... redraws_pending=... frames_pending=...
 ```
+
+Config loading and Lua migration:
+
+```text
+config: parsing ...
+config: parser=lua
+config: parser=toml compatibility path used ...
+config: lua eval start
+config: lua eval error: ...
+config: lua config shape error: ...
+config: lua parse failed: ...
+config: toml parse failed: ...
+config: unsupported config extension ...
+```
+
+These are intentionally verbose during the Lua-first migration. Once
+`hypr-drift` reliably boots from Lua, gate these behind normal tracing levels or
+remove the duplicate `tracing::error!` calls so config loading does not waste
+cycles on stable boots.
 
 Panic capture:
 
@@ -204,19 +225,21 @@ When the freeze issue is solved and the diagnostics are no longer needed:
 2. Remove `mod diagnostics;` from `src/main.rs`.
 3. Remove startup, event-loop, and heartbeat calls from `src/main.rs`.
 4. Remove the panic hook from `src/main.rs` if no longer needed.
-5. Remove `crate::diagnostics::log(...)` calls from `src/xwayland.rs`.
-6. Remove signal diagnostics from `src/signals.rs`.
-7. Remove `use driftwm::window_ext::WindowExt;` from `src/main.rs` if it is only
+5. Remove or downgrade Lua/config migration tracing in `src/config/lua.rs` and
+   `src/config/mod.rs` once Lua config is stable.
+6. Remove `crate::diagnostics::log(...)` calls from `src/xwayland.rs`.
+7. Remove signal diagnostics from `src/signals.rs`.
+8. Remove `use driftwm::window_ext::WindowExt;` from `src/main.rs` if it is only
    used by the heartbeat.
-8. Remove `crate::diagnostics::log(...)` calls from:
+9. Remove `crate::diagnostics::log(...)` calls from:
    `src/handlers/x11.rs`, `src/handlers/xdg_shell.rs`,
    `src/handlers/compositor.rs`, `src/grabs/move_grab.rs`, and
    `src/state/tile.rs`.
-9. Remove `use std::time::Instant;` from `src/state/tile.rs` if timing is no
+10. Remove `use std::time::Instant;` from `src/state/tile.rs` if timing is no
    longer used.
-10. Delete or ignore the persistent log file:
+11. Delete or ignore the persistent log file:
    `/home/unknown/Documents/scripts/projectcampaign/parallax-hypr-drift-freeze.log`.
-11. Run `cargo fmt` and `cargo check`.
+12. Run `cargo fmt` and `cargo check`.
 
 ## Notes
 

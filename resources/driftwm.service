@@ -1,5 +1,5 @@
 [Unit]
-Description=driftwm, a trackpad-first infinite canvas Wayland compositor
+Description=Hypr Drift, a Hyprland-inspired infinite canvas Wayland compositor
 BindsTo=graphical-session.target
 Before=graphical-session.target
 Wants=graphical-session-pre.target
@@ -12,4 +12,4 @@ Before=xdg-desktop-autostart.target
 Slice=session.slice
 Type=notify
 NotifyAccess=main
-ExecStart=driftwm
+ExecStart=hypr-drift

@@ -1,5 +1,6 @@
 mod defaults;
 
+mod lua;
 mod parse;
 mod parse_helpers;
 mod toml;
@@ -200,7 +201,58 @@ impl Config {
         Ok(Self::from_raw(raw))
     }
 
-    /// Load config from `$XDG_CONFIG_HOME/driftwm/config.toml` (or `~/.config/driftwm/config.toml`).
+    /// Parse a Lua config into a Config. Lua returns a table matching the
+    /// existing raw config shape, so validation still goes through from_raw().
+    pub fn from_lua(lua_str: &str) -> Result<Self, String> {
+        let raw = lua::parse_lua_config(lua_str)?;
+        Ok(Self::from_raw(raw))
+    }
+
+    pub fn from_config_contents(
+        config_path: &std::path::Path,
+        contents: &str,
+    ) -> Result<Self, String> {
+        tracing::info!("config: parsing {}", config_path.display());
+        match config_path.extension().and_then(|ext| ext.to_str()) {
+            Some("lua") => {
+                tracing::info!("config: parser=lua");
+                Self::from_lua(contents).map_err(|e| {
+                    tracing::error!("config: lua parse failed: {e}");
+                    e
+                })
+            }
+            Some("toml") => {
+                tracing::warn!(
+                    "config: parser=toml compatibility path used for {}",
+                    config_path.display()
+                );
+                Self::from_toml(contents).map_err(|e| {
+                    let msg = e.to_string();
+                    tracing::error!("config: toml parse failed: {msg}");
+                    msg
+                })
+            }
+            Some(ext) => {
+                let msg = format!(
+                    "unsupported config extension '.{ext}' for {}; expected .lua",
+                    config_path.display()
+                );
+                tracing::error!("config: {msg}");
+                Err(msg)
+            }
+            None => {
+                let msg = format!(
+                    "config path {} has no extension; expected .lua",
+                    config_path.display()
+                );
+                tracing::error!("config: {msg}");
+                Err(msg)
+            }
+        }
+    }
+
+    /// Load config from `$XDG_CONFIG_HOME/hypr-drift/config.lua`.
+    /// Legacy TOML paths are still supported as a fallback.
     /// Missing file → all defaults. Parse failure → error log + all defaults.
     pub fn load() -> Self {
         Self::load_from(&config_path())
@@ -224,8 +276,8 @@ impl Config {
         let (raw, error) = match std::fs::read_to_string(config_path) {
             Ok(contents) => {
                 tracing::info!("Loaded config from {}", config_path.display());
-                match ::toml::from_str::<ConfigFile>(&contents) {
-                    Ok(cf) => (cf, None),
+                match Self::from_config_contents(config_path, &contents) {
+                    Ok(config) => return (config, None),
                     Err(e) => {
                         tracing::error!("Failed to parse config: {e}");
                         (ConfigFile::default(), Some(format!("config error: {e}")))
@@ -233,7 +285,10 @@ impl Config {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::info!("No config file found, using defaults");
+                tracing::info!(
+                    "No config file found at {}, using defaults",
+                    config_path.display()
+                );
                 (ConfigFile::default(), None)
             }
             Err(e) => {

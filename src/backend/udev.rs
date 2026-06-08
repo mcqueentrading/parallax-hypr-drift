@@ -165,6 +165,7 @@ pub(crate) fn render_if_needed(data: &mut DriftWm) {
     if data.redraws_needed.is_empty()
         && !data.has_active_animations()
         && !data.render.background_is_animated
+        && !data.config.decorations.animate_border_angle
         && !data.output_config_dirty
         && data.pending_dpms.is_empty()
         && !any_chunked_pending
@@ -249,6 +250,7 @@ pub(crate) fn render_if_needed(data: &mut DriftWm) {
         || data.cursor.exec_cursor_deadline.is_some()
         || data.cursor_is_animated()
         || data.render.background_is_animated
+        || data.config.decorations.animate_border_angle
     {
         data.mark_all_dirty();
     }

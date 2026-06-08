@@ -264,6 +264,17 @@ pub fn compose_frame(
                 effective_mode,
                 &state.config.decorations,
             );
+        let focused_gradient = is_focused
+            .then_some(state.config.decorations.border_color_focused_gradient)
+            .flatten();
+        let border_angle = if is_focused && state.config.decorations.animate_border_angle {
+            state.config.decorations.border_angle
+                + state.start_time.elapsed().as_secs_f32()
+                    * state.config.decorations.border_animation_speed
+                    * 45.0
+        } else {
+            state.config.decorations.border_angle
+        };
 
         let mut bbox = window.bbox();
         bbox.loc += loc - geom_loc;
@@ -443,6 +454,8 @@ pub fn compose_frame(
                     effective_corner_radius as f32,
                     effective_bw,
                     border_color,
+                    focused_gradient,
+                    border_angle,
                     is_focused,
                     opacity,
                     scale,
@@ -524,6 +537,8 @@ pub fn compose_frame(
                         radius,
                         effective_bw,
                         border_color,
+                        focused_gradient,
+                        border_angle,
                         is_focused,
                         opacity,
                         scale,

@@ -771,6 +771,10 @@ pub struct DecorationConfig {
     pub border_width: i32,
     pub border_color: [u8; 4],
     pub border_color_focused: [u8; 4],
+    pub border_color_focused_gradient: Option<[[u8; 4]; 4]>,
+    pub border_angle: f32,
+    pub animate_border_angle: bool,
+    pub border_animation_speed: f32,
     /// Global drop-shadow toggle. Per-window `shadow` rules override this.
     pub shadow: bool,
     /// SSD title bar height in logical pixels.
@@ -793,6 +797,10 @@ impl Default for DecorationConfig {
             border_width: 0,
             border_color: [0x30, 0x30, 0x30, 0xFF],
             border_color_focused: [0x30, 0x30, 0x30, 0xFF],
+            border_color_focused_gradient: None,
+            border_angle: 45.0,
+            animate_border_angle: false,
+            border_animation_speed: 7.0,
             shadow: true,
             title_bar_height: 25,
             font: "Adwaita Sans".to_string(),
