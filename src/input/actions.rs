@@ -227,13 +227,26 @@ impl DriftWm {
                 }
             }
             Action::HomeToggle => {
-                let viewport_size = self.get_viewport_size();
                 let zoom = self.zoom();
                 let camera = self.camera();
+                let workspace_1 = self
+                    .workspaces
+                    .get(&1)
+                    .map(|workspace| workspace.rect)
+                    .unwrap_or_else(|| self.active_workspace_rect());
+                let vc = self.usable_center_screen();
+                let home_center = Point::from((
+                    workspace_1.loc.x as f64 + workspace_1.size.w as f64 / 2.0,
+                    workspace_1.loc.y as f64 + workspace_1.size.h as f64 / 2.0,
+                ));
+                let home = Point::from((home_center.x - vc.x, home_center.y - vc.y));
 
-                // At home means zoom ≈ 1.0 AND origin visible
+                // In Parallax Hypr Drift, "home" is workspace 1 centered at
+                // zoom 1.0. The old DriftWM origin check lands half a
+                // viewport up-left of workspace 1 on a 1920x1080 display.
                 let at_home = (zoom - 1.0).abs() < 0.01
-                    && canvas::is_origin_visible(camera, viewport_size, zoom);
+                    && (camera.x - home.x).abs() < 2.0
+                    && (camera.y - home.y).abs() < 2.0;
 
                 if at_home {
                     // We're at home — return to saved position
@@ -259,7 +272,8 @@ impl DriftWm {
                         }
                     }
                 } else {
-                    // Not at home — save current position+zoom and go home at zoom=1.0
+                    // Not at home — save current position+zoom and go to
+                    // workspace 1 at zoom 1.0.
                     self.with_output_state(|os| {
                         os.home_return = Some(HomeReturn {
                             camera,
@@ -267,18 +281,17 @@ impl DriftWm {
                             fullscreen_window: was_fullscreen.clone(),
                         });
                     });
+                    self.active_workspace = 1;
                     self.set_overview_return(None);
-                    let vc = self.usable_center_screen();
-                    let home = Point::from((-vc.x, -vc.y));
                     if was_fullscreen.is_some() {
                         // Snap instantly — matches the instant return path and
                         // avoids animation warps that misplace the cursor.
                         self.set_camera(home);
                         self.set_zoom(1.0);
                         self.update_output_from_camera();
-                        self.warp_pointer(Point::from((0.0, 0.0)));
+                        self.warp_pointer(home_center);
                     } else {
-                        self.set_zoom_animation_center(Some(Point::from((0.0, 0.0))));
+                        self.set_zoom_animation_center(Some(home_center));
                         self.set_camera_target(Some(home));
                         self.set_zoom_target(Some(1.0));
                     }
