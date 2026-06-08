@@ -152,6 +152,56 @@ impl DriftWm {
         true
     }
 
+    fn focus_nearest_tiled_after_unmap(
+        &mut self,
+        workspace_id: WorkspaceId,
+        removed_rect: Rectangle<i32, Logical>,
+    ) {
+        let removed_center = Point::<i32, Logical>::from((
+            removed_rect.loc.x + removed_rect.size.w / 2,
+            removed_rect.loc.y + removed_rect.size.h / 2,
+        ));
+        let Some(workspace) = self.workspaces.get(&workspace_id) else {
+            return;
+        };
+        let Some((candidate_id, _)) = workspace.tile_rects.iter().min_by_key(|(_, rect)| {
+            let center_x = rect.loc.x + rect.size.w / 2;
+            let center_y = rect.loc.y + rect.size.h / 2;
+            let dx = center_x - removed_center.x;
+            let dy = center_y - removed_center.y;
+            dx.saturating_mul(dx).saturating_add(dy.saturating_mul(dy))
+        }) else {
+            crate::diagnostics::log(format!(
+                "tile:focus_after_unmap workspace={workspace_id} skip=no_candidate"
+            ));
+            return;
+        };
+        let candidate_id = candidate_id.clone();
+        let candidate = self
+            .space
+            .elements()
+            .find(|window| {
+                Self::window_object_id(window)
+                    .as_ref()
+                    .is_some_and(|id| *id == candidate_id)
+            })
+            .cloned();
+        let Some(candidate) = candidate else {
+            crate::diagnostics::log(format!(
+                "tile:focus_after_unmap workspace={workspace_id} skip=candidate_unmapped id={candidate_id:?}"
+            ));
+            return;
+        };
+
+        crate::diagnostics::log(format!(
+            "tile:focus_after_unmap workspace={workspace_id} id={candidate_id:?} app={:?} title={:?}",
+            candidate.app_id_or_class(),
+            candidate.window_title()
+        ));
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        self.raise_and_focus(&candidate, serial);
+    }
+
     fn workspace_for_window_id(&self, id: &ObjectId) -> Option<WorkspaceId> {
         self.workspaces
             .iter()
@@ -403,10 +453,12 @@ impl DriftWm {
             self.in_workspace_perspective(),
             self.active_workspace
         ));
-        if let Some(removed_rect) = unmap_state.removed_rect
+        let removed_rect = unmap_state.removed_rect;
+        if let Some(removed_rect) = removed_rect
             && self.merge_removed_tile_into_sibling(workspace_id, removed_rect)
         {
             self.apply_workspace_tile_rects(workspace_id);
+            self.focus_nearest_tiled_after_unmap(workspace_id, removed_rect);
             if self.in_workspace_perspective() && workspace_id == self.active_workspace {
                 self.stabilize_tiled_workspace_view();
             }
@@ -414,6 +466,9 @@ impl DriftWm {
         }
 
         self.tile_workspace(workspace_id, false);
+        if let Some(removed_rect) = removed_rect {
+            self.focus_nearest_tiled_after_unmap(workspace_id, removed_rect);
+        }
         if self.in_workspace_perspective() && workspace_id == self.active_workspace {
             self.stabilize_tiled_workspace_view();
         }
