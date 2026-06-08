@@ -401,10 +401,19 @@ Parallax Hypr Drift is based on DriftWM by malbiruk:
 https://github.com/malbiruk/driftwm
 ```
 
+It also deliberately takes desktop workflow inspiration from Hyprland by Vaxry:
+
+```text
+https://github.com/hyprwm/Hyprland
+https://hypr.land
+```
+
 DriftWM provides the infinite-canvas Wayland compositor foundation. This fork
-changes the product direction toward a Hyprland-like tiled workflow, six visible
-workspace zones, stronger app/session reliability, parallax projection research,
-and programmable configuration.
+changes the product direction toward Hyprland-style tiling, focus behavior,
+window placement, monitor ergonomics, and programmable configuration, while
+keeping DriftWM's infinite-canvas foundation. Credit belongs to both projects:
+DriftWM for the editable infinite-canvas base, and Hyprland/Vaxry for the
+proven tiling workflow we are using as the reference target.
 
 ## License
 
