@@ -151,6 +151,17 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
             }
             Ok(Action::MoveWindowToWorkspace(id))
         }
+        "focus-output" | "switch-output" | "monitor" => {
+            let arg = arg.ok_or("focus-output requires an id: focus-output <1-10>")?;
+            let id: u8 = arg
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid output id: {}", arg.trim()))?;
+            if !(1..=10).contains(&id) {
+                return Err(format!("output id must be 1-10, got {id}"));
+            }
+            Ok(Action::FocusOutput(id))
+        }
         "zoom-in" => Ok(Action::ZoomIn),
         "zoom-out" => Ok(Action::ZoomOut),
         "zoom-reset" => Ok(Action::ZoomReset),

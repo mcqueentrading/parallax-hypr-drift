@@ -132,6 +132,7 @@ should change the view, not destroy or reorder the user's windows.
 | `Mod+A` | Toggle between workspace 1 and previous canvas position |
 | `Mod+O` | Toggle between six-workspace overview and previous canvas position |
 | `Mod+Ctrl+M` | Toggle independent/mirrored monitor viewports |
+| `Alt+1` .. `Alt+0` | Move cursor/focus to monitor 1..10 by layout order |
 | `Mod+V` | Toggle focused window floating/tiled |
 | `Mod+T` | Force current workspace back into tiling |
 | `Mod+W` | Zoom to fit current windows |
@@ -156,7 +157,9 @@ moves only monitor 1 to workspace 2; if the pointer is on monitor 2 then
 Monitor placement follows the configured output layout, similar to Hyprland's
 monitor positions. Use `[[outputs]] position = [x, y]` to decide how the pointer
 crosses between screens. `Mod+Ctrl+M` toggles mirror mode, where all connected
-monitors follow the active monitor's camera and zoom.
+monitors follow the active monitor's camera and zoom. `Alt+1` through `Alt+0`
+warps the cursor to a monitor by layout order, so a user can switch active
+monitors without dragging across the whole output arrangement.
 
 ## What Makes It Different
 

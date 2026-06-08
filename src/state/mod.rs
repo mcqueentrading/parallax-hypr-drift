@@ -878,6 +878,50 @@ impl DriftWm {
             .map(|(o, _)| o)
     }
 
+    /// Output by row-major layout position: top-to-bottom, then left-to-right.
+    /// This gives stable Alt+1/Alt+2 monitor switching based on configured
+    /// monitor placement rather than hotplug enumeration order.
+    pub fn output_by_index(&self, index: u8) -> Option<Output> {
+        if index == 0 {
+            return None;
+        }
+        let mut outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        outputs.sort_by(|a, b| {
+            let a_state = output_state(a);
+            let b_state = output_state(b);
+            let a_pos = a_state.layout_position;
+            let b_pos = b_state.layout_position;
+            drop(a_state);
+            drop(b_state);
+            (a_pos.y, a_pos.x, a.name()).cmp(&(b_pos.y, b_pos.x, b.name()))
+        });
+        outputs.into_iter().nth(index as usize - 1)
+    }
+
+    pub fn focus_output_by_index(&mut self, index: u8) {
+        let Some(output) = self.output_by_index(index) else {
+            crate::diagnostics::log(format!("output:focus skip=missing index={index}"));
+            return;
+        };
+        let (camera, zoom) = {
+            let os = output_state(&output);
+            (os.camera, os.zoom)
+        };
+        let center = usable_center_for_output(&output);
+        let canvas_center = Point::from((camera.x + center.x / zoom, camera.y + center.y / zoom));
+        self.focused_output = Some(output.clone());
+        crate::diagnostics::log(format!(
+            "output:focus index={index} name={} cursor=({:.1},{:.1}) camera=({:.1},{:.1}) zoom={:.3}",
+            output.name(),
+            canvas_center.x,
+            canvas_center.y,
+            camera.x,
+            camera.y,
+            zoom
+        ));
+        self.warp_pointer(canvas_center);
+    }
+
     /// Output whose layout rectangle contains `pos`. Uses `layout_position` +
     /// mode size (NOT `space.output_geometry()`, which is zoom-cached).
     pub fn output_at_layout_pos(&self, pos: Point<f64, Logical>) -> Option<Output> {

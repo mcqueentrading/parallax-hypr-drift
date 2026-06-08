@@ -250,6 +250,7 @@
 #   reload-config           — hot-reload config file
 #   quit                    — exit the compositor
 #   send-to-output <dir>    — move focused window to adjacent output
+#   focus-output <id>       — move cursor/focus to output 1-10 by layout order
 #   toggle-output-mirror    — toggle independent/mirrored monitor viewports
 #   none                    — unbind this key combo
 #
@@ -263,6 +264,8 @@
 # "mod+m" = "fit-window"
 # "mod+shift+m" = "fit-window-snapped"
 # "mod+ctrl+m" = "toggle-output-mirror"
+# "alt+1" = "focus-output 1"       # output order follows configured monitor positions
+# "alt+2" = "focus-output 2"
 # "mod+c" = "center-window"
 # "mod+x" = "focus-center"
 # "mod+a" = "home-toggle"

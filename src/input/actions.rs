@@ -429,6 +429,9 @@ impl DriftWm {
                     self.raise_and_focus(&window, serial);
                 }
             }
+            Action::FocusOutput(index) => {
+                self.focus_output_by_index(*index);
+            }
             Action::ToggleOutputMirror => {
                 self.config.output_view_mode = match self.config.output_view_mode {
                     OutputViewMode::Independent => {

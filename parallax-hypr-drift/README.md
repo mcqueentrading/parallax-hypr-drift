@@ -107,6 +107,7 @@ chmod +x ~/.local/bin/start-parallax-hypr-drift
 - `SUPER+V` - toggle focused window floating/tiled.
 - `SUPER+O` - toggle six-workspace overview / previous position.
 - `SUPER+Ctrl+M` - toggle independent/mirrored monitor viewports.
+- `Alt+1` .. `Alt+0` - move cursor/focus to monitor 1..10 by layout order.
 - `SUPER+W` - zoom to fit current windows.
 - `SUPER+Left Click` - move floating window.
 - `SUPER+Right Click` - resize floating window.

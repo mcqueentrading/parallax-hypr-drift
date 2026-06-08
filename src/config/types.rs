@@ -63,6 +63,7 @@ pub enum Action {
     ToggleFloating,
     TileCurrentWorkspace,
     SendToOutput(Direction),
+    FocusOutput(u8),
     ToggleOutputMirror,
     FocusCenter,
     ReloadConfig,

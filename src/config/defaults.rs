@@ -456,6 +456,31 @@ pub(super) fn default_bindings(
         ]);
     }
 
+    let alt_only = Modifiers {
+        alt: true,
+        ..Modifiers::EMPTY
+    };
+    for (sym, output_id) in [
+        (keysyms::KEY_1, 1),
+        (keysyms::KEY_2, 2),
+        (keysyms::KEY_3, 3),
+        (keysyms::KEY_4, 4),
+        (keysyms::KEY_5, 5),
+        (keysyms::KEY_6, 6),
+        (keysyms::KEY_7, 7),
+        (keysyms::KEY_8, 8),
+        (keysyms::KEY_9, 9),
+        (keysyms::KEY_0, 10),
+    ] {
+        bindings.insert(
+            KeyCombo {
+                modifiers: alt_only.clone(),
+                sym: Keysym::from(sym),
+            },
+            Action::FocusOutput(output_id),
+        );
+    }
+
     bindings
 }
 
