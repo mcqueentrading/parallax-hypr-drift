@@ -43,6 +43,8 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
         xdg_foreign::XdgForeignState,
+        xwayland_keyboard_grab::XWaylandKeyboardGrabState,
+        xwayland_shell::XWaylandShellState,
     },
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -79,6 +81,8 @@ impl DriftWm {
                 xdg_toplevel::WmCapabilities::Maximize,
             ],
         );
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
+        XWaylandKeyboardGrabState::new::<Self>(&dh);
         // wl_shm advertises Argb8888 + Xrgb8888 unconditionally; extra formats
         // here are needed by smithay-client-toolkit-based clients (xdph-cosmic,
         // sctk apps) that allocate buffers in renderer-native layouts.
@@ -217,6 +221,9 @@ impl DriftWm {
             popups: PopupManager::default(),
             compositor_state,
             xdg_shell_state,
+            xwayland_shell_state,
+            xwm: None,
+            xdisplay: None,
             shm_state,
             output_manager_state,
             seat_state,
@@ -314,7 +321,6 @@ impl DriftWm {
             disconnected_outputs: HashSet::new(),
             output_config_dirty: false,
             pending_mode_changes: HashMap::new(),
-            satellite: None,
             udev_device: None,
             last_titlebar_click: None,
             errors,

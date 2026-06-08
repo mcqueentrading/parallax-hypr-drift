@@ -1,6 +1,7 @@
 pub mod background_effect;
 pub mod compositor;
 pub mod layer_shell;
+pub mod x11;
 pub mod xdg_shell;
 
 /// Skip the pan on xdg-activation only when the activated window is already
@@ -19,7 +20,8 @@ use smithay::{
     delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
     delegate_relative_pointer, delegate_seat, delegate_security_context,
     delegate_single_pixel_buffer, delegate_text_input_manager, delegate_viewporter,
-    delegate_virtual_keyboard_manager, delegate_xdg_activation,
+    delegate_virtual_keyboard_manager, delegate_xdg_activation, delegate_xwayland_keyboard_grab,
+    delegate_xwayland_shell,
     input::{
         Seat, SeatHandler, SeatState,
         dnd::{self, DnDGrab},
@@ -58,6 +60,7 @@ use smithay::{
         xdg_activation::{
             XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
         },
+        xwayland_keyboard_grab::XWaylandKeyboardGrabHandler,
     },
 };
 
@@ -118,6 +121,18 @@ impl SeatHandler for DriftWm {
 
 delegate_seat!(DriftWm);
 delegate_text_input_manager!(DriftWm);
+
+impl XWaylandKeyboardGrabHandler for DriftWm {
+    fn keyboard_focus_for_xsurface(&self, surface: &WlSurface) -> Option<FocusTarget> {
+        let window = self.window_for_surface(surface)?;
+        window
+            .wl_surface()
+            .map(|surface| FocusTarget(surface.into_owned()))
+    }
+}
+
+delegate_xwayland_keyboard_grab!(DriftWm);
+delegate_xwayland_shell!(DriftWm);
 
 impl SelectionHandler for DriftWm {
     type SelectionUserData = ();

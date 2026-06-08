@@ -9,6 +9,7 @@ use smithay::utils::Rectangle;
 use smithay::wayland::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, LayerSurfaceCachedState, LayerSurfaceData,
 };
+use smithay::xwayland::XWaylandClientData;
 use smithay::{
     delegate_compositor, delegate_shm,
     reexports::{
@@ -35,6 +36,9 @@ impl CompositorHandler for DriftWm {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        if let Some(state) = client.get_data::<XWaylandClientData>() {
+            return &state.compositor_state;
+        }
         &client
             .get_data::<ClientState>()
             .expect("client has no ClientState")

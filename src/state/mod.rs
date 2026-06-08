@@ -69,6 +69,8 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_foreign::XdgForeignState;
+use smithay::wayland::xwayland_shell::XWaylandShellState;
+use smithay::xwayland::X11Wm;
 
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::wayland::seat::WaylandFocus;
@@ -319,6 +321,9 @@ pub struct DriftWm {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub xwayland_shell_state: XWaylandShellState,
+    pub xwm: Option<X11Wm>,
+    pub xdisplay: Option<u32>,
     pub shm_state: ShmState,
     #[allow(dead_code)]
     pub output_manager_state: OutputManagerState,
@@ -515,8 +520,6 @@ pub struct DriftWm {
     /// Drained by the udev render loop, which resolves each intent to a
     /// concrete `control::Mode`. Keyed by output name; backend resolves CRTCs.
     pub pending_mode_changes: HashMap<String, PendingMode>,
-
-    pub satellite: Option<crate::xwayland::Satellite>,
 
     /// Udev backend handle (Rc — cloneable). Single owner here; render loop
     /// and protocols (gamma_control) borrow via `udev_device.as_ref()`.
