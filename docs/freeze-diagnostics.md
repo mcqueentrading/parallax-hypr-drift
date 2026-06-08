@@ -184,9 +184,10 @@ focus on native XWayland startup before the event loop. If `xwayland:ready`
 appears but `xwayland:xwm_start_ok` does not, focus on Smithay XWM attachment.
 
 If the last events are `x11:*`, focus on native XWayland window lifecycle.
-Steam and other X11 apps are temporarily kept out of forced tiling while this is
-stabilised, because configure/unmap storms can cause black/grey windows,
-slow animation, or lockups.
+X11 windows use Hyprland-style split rules: normal X11 top-levels may tile,
+while dialogs, menus, tooltips, docks, splash/utility windows, modal/popup
+windows, override-redirect windows, transient windows, and fixed-size helper
+windows stay floating.
 
 `x11:configure_request` intentionally logs `x_ignored` and `y_ignored`: X11
 clients can request size changes, but compositor-owned placement should not let

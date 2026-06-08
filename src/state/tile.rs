@@ -187,7 +187,7 @@ impl DriftWm {
     }
 
     fn is_tiling_candidate(&self, window: &Window) -> bool {
-        if window.x11_surface().is_some() {
+        if window.x11_surface().is_some() && Self::x11_window_should_float(window) {
             return false;
         }
         if window.is_widget() || window.parent_surface().is_some() || window.is_modal() {

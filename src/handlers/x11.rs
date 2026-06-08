@@ -51,11 +51,9 @@ impl XwmHandler for DriftWm {
         self.space.map_element(window.clone(), pos, true);
         self.space.raise_element(&window, true);
         if let Some(id) = Self::x11_window_id(&window) {
-            // Keep X11 apps stable first. Steam creates many transient/helper
-            // windows; forcing those through the dwindle tiler can feed back
-            // configure/unmap storms. Native XWayland tiling can be enabled
-            // later per-window once lifecycle is proven.
-            self.floating_windows.insert(id);
+            if Self::x11_should_float(&surface) {
+                self.floating_windows.insert(id);
+            }
         }
         if let Some(rect) = self.space.element_bbox(&window)
             && let Err(err) = surface.configure(Some(rect))
@@ -71,12 +69,18 @@ impl XwmHandler for DriftWm {
             tracing::warn!("failed to configure new X11 window: {err}");
         }
         crate::diagnostics::log(format!(
-            "x11:map_done {} pos=({}, {}) floating=true",
+            "x11:map_done {} pos=({}, {}) floating={}",
             Self::describe_x11(&surface),
             pos.x,
-            pos.y
+            pos.y,
+            Self::x11_should_float(&surface)
         ));
-        self.mark_all_dirty();
+        if self.in_workspace_perspective() && !Self::x11_should_float(&surface) {
+            self.tile_windows();
+            self.stabilize_tiled_workspace_view();
+        } else {
+            self.mark_all_dirty();
+        }
         self.sync_pointer_focus_under_cursor();
     }
 
@@ -217,14 +221,60 @@ impl DriftWm {
         window.wl_surface().map(|surface| surface.id())
     }
 
+    pub(crate) fn x11_window_should_float(window: &Window) -> bool {
+        window.x11_surface().is_some_and(Self::x11_should_float)
+    }
+
+    fn x11_should_float(surface: &X11Surface) -> bool {
+        use smithay::xwayland::xwm::WmWindowType;
+
+        let special_type = matches!(
+            surface.window_type(),
+            Some(
+                WmWindowType::Combo
+                    | WmWindowType::Desktop
+                    | WmWindowType::Dnd
+                    | WmWindowType::Dock
+                    | WmWindowType::DropdownMenu
+                    | WmWindowType::Dialog
+                    | WmWindowType::Menu
+                    | WmWindowType::Notification
+                    | WmWindowType::PopupMenu
+                    | WmWindowType::Splash
+                    | WmWindowType::Toolbar
+                    | WmWindowType::Tooltip
+                    | WmWindowType::Utility
+            )
+        );
+        if special_type
+            || surface.is_popup()
+            || surface.is_override_redirect()
+            || surface.is_transient_for().is_some()
+        {
+            return true;
+        }
+
+        surface.size_hints().is_some_and(|hints| {
+            matches!(
+                (hints.min_size, hints.max_size),
+                (Some((min_w, min_h)), Some((max_w, max_h)))
+                    if min_w > 0 && min_h > 0 && min_w == max_w && min_h == max_h
+            )
+        })
+    }
+
     fn describe_x11(surface: &X11Surface) -> String {
         let geometry = surface.geometry();
         format!(
-            "xid={:?} mapped={:?} override={} decorated={} class={:?} title={:?} pid={:?} geo=({}, {}) {}x{}",
+            "xid={:?} mapped={:?} override={} decorated={} should_float={} type={:?} transient={:?} popup={} class={:?} title={:?} pid={:?} geo=({}, {}) {}x{}",
             surface.window_id(),
             surface.is_mapped(),
             surface.is_override_redirect(),
             surface.is_decorated(),
+            Self::x11_should_float(surface),
+            surface.window_type(),
+            surface.is_transient_for(),
+            surface.is_popup(),
             surface.class(),
             surface.title(),
             surface.pid(),
