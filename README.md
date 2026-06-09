@@ -72,10 +72,16 @@ Current development focus:
 - New tiled windows spawn into the target workspace instead of appearing in an
   arbitrary canvas location first.
 - New windows can split the tile under the cursor.
+- Each workspace now carries its own dwindle tree, so window relationships are
+  preserved instead of being guessed from rectangle order every time.
 - `SUPER+V` toggles a window between floating and tiled.
+- `SUPER+J` toggles the split direction of the active dwindle node, similar to
+  Hyprland's `togglesplit`.
 - `SUPER+T` forces all normal windows in the current workspace back into tiling.
 - Closing, floating, or moving a tiled window should make remaining windows fill
   the available space again.
+- `SUPER+O` shows the six-zone overview with grey workspace outlines and a
+  pulsing active-workspace border.
 - XWayland support is being integrated directly so X11 apps can participate more
   cleanly in the compositor.
 - Diagnostics are intentionally verbose while hard-freeze and placement bugs are
@@ -134,6 +140,7 @@ should change the view, not destroy or reorder the user's windows.
 | `Mod+Ctrl+M` | Toggle independent/mirrored monitor viewports |
 | `Alt+1` .. `Alt+0` | Move cursor/focus to monitor 1..10 by layout order |
 | `Mod+V` | Toggle focused window floating/tiled |
+| `Mod+J` | Toggle active dwindle split direction |
 | `Mod+T` | Force current workspace back into tiling |
 | `Mod+W` | Zoom to fit current windows |
 | `Mod+Q` / `Mod+Return` | Launch terminal in the example config |
@@ -280,7 +287,10 @@ Status: in progress.
 Status: in progress.
 
 - Tiled windows fill the workspace zone.
+- Tiling state is moving from rectangle-only rebuilds to one real dwindle tree
+  per workspace.
 - New windows split the tile under the cursor.
+- `SUPER+J` flips the parent split for the active dwindle leaf.
 - Floating and close/unmap transitions retile remaining windows.
 - `SUPER+T` forces current workspace windows back into tiling.
 
@@ -328,6 +338,7 @@ Status: planned.
 - Animated borders.
 - Better focused-window effects.
 - Cleaner workspace outlines.
+- Overview-mode workspace outlines with active-workspace pulsing.
 - More intentional shader/background presets.
 - A stronger project visual identity and logo.
 

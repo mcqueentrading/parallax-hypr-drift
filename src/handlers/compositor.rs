@@ -569,6 +569,10 @@ impl CompositorHandler for DriftWm {
                         // rect; non-snapped fit and fullscreen keep this.
                         self.refresh_stable_snap_rect(&window);
                         self.sync_pointer_focus_under_cursor();
+                        if !is_widget && !is_fullscreen && !deferred_fit_or_fs && !is_floating {
+                            let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+                            self.raise_and_focus(&window, serial);
+                        }
 
                         if self.pending_fullscreen.remove(&root) {
                             self.enter_fullscreen(&window);

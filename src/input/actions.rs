@@ -403,6 +403,9 @@ impl DriftWm {
             Action::ToggleFloating => {
                 self.toggle_floating_window();
             }
+            Action::ToggleDwindleSplit => {
+                self.toggle_dwindle_split_current_workspace();
+            }
             Action::TileCurrentWorkspace => {
                 self.tile_current_workspace_windows();
             }

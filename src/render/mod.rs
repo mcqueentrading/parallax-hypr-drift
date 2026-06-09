@@ -53,6 +53,7 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer as WlrLayer;
 
+use crate::surface_tree::focus_belongs_to_window;
 use driftwm::canvas;
 use driftwm::window_ext::WindowExt;
 
@@ -231,7 +232,9 @@ pub fn compose_frame(
 
         let applied = driftwm::config::applied_rule(&wl_surface);
         let is_widget = applied.as_ref().is_some_and(|r| r.widget);
-        let is_focused = focused_surface.as_ref().is_some_and(|f| *f == *wl_surface);
+        let is_focused = focused_surface
+            .as_ref()
+            .is_some_and(|f| focus_belongs_to_window(f, window));
         let effective_mode = driftwm::config::effective_decoration_mode(
             applied.as_ref().and_then(|r| r.decoration.as_ref()),
             &state.config.decorations.default_mode,
@@ -268,10 +271,12 @@ pub fn compose_frame(
             .then_some(state.config.decorations.border_color_focused_gradient)
             .flatten();
         let border_angle = if is_focused && state.config.decorations.animate_border_angle {
-            state.config.decorations.border_angle
-                + state.start_time.elapsed().as_secs_f32()
-                    * state.config.decorations.border_animation_speed
-                    * 45.0
+            let duration =
+                (1.0 / state.config.decorations.border_animation_speed.max(0.1)).clamp(0.12, 2.0);
+            let t =
+                (state.active_border_started_at.elapsed().as_secs_f32() / duration).clamp(0.0, 1.0);
+            let eased = 1.0 - (1.0 - t).powi(5);
+            state.config.decorations.border_angle - 360.0 + eased * 360.0
         } else {
             state.config.decorations.border_angle
         };
@@ -682,8 +687,16 @@ pub fn compose_frame(
 
     let canvas_layer_elements = build_canvas_layer_elements(state, renderer, output, camera, zoom);
 
-    let outline_elements =
+    let mut outline_elements =
         build_output_outline_elements(state, renderer, output, camera, zoom, viewport_size);
+    outline_elements.extend(build_workspace_outline_elements(
+        state,
+        renderer,
+        output,
+        camera,
+        zoom,
+        viewport_size,
+    ));
 
     let bg_elements: Vec<OutputRenderElements> = if output_fullscreen {
         vec![]
@@ -936,6 +949,116 @@ fn build_output_outline_elements(
                 loc,
                 &buf,
                 Some(opacity),
+                None,
+                None,
+                Kind::Unspecified,
+            ) {
+                elements.push(OutputRenderElements::Decoration(
+                    PixelSnapRescaleElement::from_element(
+                        elem,
+                        Point::<i32, Physical>::from((0, 0)),
+                        1.0,
+                    ),
+                ));
+            }
+        }
+    }
+
+    elements
+}
+
+/// Thin workspace borders for the six-zone overview. The active workspace gets
+/// a soft grey pulse so overview mode has an obvious spatial target without
+/// reusing the moving focused-window gradient.
+fn build_workspace_outline_elements(
+    state: &crate::state::DriftWm,
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    camera: Point<f64, Logical>,
+    zoom: f64,
+    viewport_size: Size<i32, Logical>,
+) -> Vec<OutputRenderElements> {
+    if zoom > 0.9 {
+        return vec![];
+    }
+
+    let scale = output.current_scale().fractional_scale();
+    let pointer_workspace = state.workspace_at_pointer();
+    let active_workspace = pointer_workspace.unwrap_or(state.active_workspace);
+    let pulse =
+        ((state.start_time.elapsed().as_secs_f32() * 2.8).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+    let active_v = (88.0 + 148.0 * pulse).round() as u8;
+    let thickness = 2;
+    let vp = Rectangle::from_size(viewport_size);
+    let mut elements = Vec::new();
+
+    for (&workspace_id, workspace) in &state.workspaces {
+        let screen_x = ((workspace.rect.loc.x as f64 - camera.x) * zoom).round() as i32;
+        let screen_y = ((workspace.rect.loc.y as f64 - camera.y) * zoom).round() as i32;
+        let screen_w = (workspace.rect.size.w as f64 * zoom).round() as i32;
+        let screen_h = (workspace.rect.size.h as f64 * zoom).round() as i32;
+        if screen_w <= 0 || screen_h <= 0 {
+            continue;
+        }
+
+        let outline_rect = Rectangle::new((screen_x, screen_y).into(), (screen_w, screen_h).into());
+        if !vp.overlaps(outline_rect) {
+            continue;
+        }
+
+        let color = if workspace_id == active_workspace {
+            [active_v, active_v, active_v, 220]
+        } else {
+            [72, 72, 76, 165]
+        };
+        let edges: [(i32, i32, i32, i32); 4] = [
+            (screen_x, screen_y, screen_w, thickness),
+            (
+                screen_x,
+                screen_y + screen_h - thickness,
+                screen_w,
+                thickness,
+            ),
+            (screen_x, screen_y, thickness, screen_h),
+            (
+                screen_x + screen_w - thickness,
+                screen_y,
+                thickness,
+                screen_h,
+            ),
+        ];
+
+        for (ex, ey, ew, eh) in edges {
+            let x0 = ex.max(0);
+            let y0 = ey.max(0);
+            let x1 = (ex + ew).min(viewport_size.w);
+            let y1 = (ey + eh).min(viewport_size.h);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+
+            let w = x1 - x0;
+            let h = y1 - y0;
+            let pixels: Vec<u8> = vec![color[0], color[1], color[2], color[3]]
+                .into_iter()
+                .cycle()
+                .take((w * h) as usize * 4)
+                .collect();
+            let buf = MemoryRenderBuffer::from_slice(
+                &pixels,
+                Fourcc::Abgr8888,
+                (w, h),
+                1,
+                Transform::Normal,
+                None,
+            );
+
+            let loc: Point<f64, Physical> = Point::from((x0, y0)).to_f64().to_physical(scale);
+            if let Ok(elem) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                loc,
+                &buf,
+                Some(1.0),
                 None,
                 None,
                 Kind::Unspecified,

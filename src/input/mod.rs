@@ -26,6 +26,7 @@ use crate::decorations::DecorationHit;
 use crate::state::{DriftWm, FocusTarget};
 use driftwm::canvas::{CanvasPos, ScreenPos, canvas_to_screen, screen_to_canvas};
 use driftwm::protocols::output_power::OutputPowerHandler;
+use driftwm::window_ext::WindowExt;
 
 /// Find the canvas-space element location of the window that owns the given surface.
 fn window_origin_for_surface(
@@ -231,6 +232,60 @@ impl DriftWm {
         keyboard.set_focus(self, focus_surface, serial);
     }
 
+    fn focus_workspace_mru_if_empty_pointer(
+        &mut self,
+        canvas_pos: Point<f64, smithay::utils::Logical>,
+    ) {
+        if self.pointer_over_layer || self.active_fullscreen().is_some() {
+            return;
+        }
+        if self.space.element_under(canvas_pos).is_some() {
+            return;
+        }
+
+        let point = canvas_pos.to_i32_round::<i32>();
+        let Some(workspace_id) = self.workspace_at_point(point) else {
+            // Between-workspace gaps remain true canvas space.
+            return;
+        };
+        self.active_workspace = workspace_id;
+        let Some(workspace) = self.workspaces.get(&workspace_id) else {
+            return;
+        };
+
+        let Some(window) = self
+            .focus_history
+            .iter()
+            .find(|window| {
+                window
+                    .wl_surface()
+                    .is_some_and(|surface| workspace.windows.contains(&surface.id()))
+            })
+            .cloned()
+        else {
+            return;
+        };
+        if window.is_widget() {
+            return;
+        }
+
+        let focus_surface = self
+            .topmost_modal_child(&window)
+            .or(Some(window))
+            .and_then(|w| w.wl_surface().map(|s| FocusTarget(s.into_owned())));
+        let keyboard = self.seat.get_keyboard().unwrap();
+        let already_focused = focus_surface
+            .as_ref()
+            .is_some_and(|target| keyboard.current_focus().is_some_and(|f| f.0 == target.0));
+        if already_focused {
+            return;
+        }
+
+        let serial = SERIAL_COUNTER.next_serial();
+        keyboard.set_focus(self, focus_surface, serial);
+        self.mark_all_dirty();
+    }
+
     /// Re-run the normal pointer hit-test/focus path without requiring a real
     /// mouse move. This keeps focus-follows-mouse active immediately after the
     /// first window maps or a tiled layout reshuffles under a stationary cursor.
@@ -266,6 +321,8 @@ impl DriftWm {
         self.update_decoration_cursor(canvas_pos);
         self.update_pointer_constraint(old_focus);
         self.maybe_hover_focus(canvas_pos);
+        self.focus_workspace_mru_if_empty_pointer(canvas_pos);
+        self.focus_workspace_mru_if_empty_pointer(canvas_pos);
     }
 
     /// Deactivate the constraint on the previous focus if focus changed,
@@ -351,6 +408,7 @@ impl DriftWm {
         pointer.frame(self);
         self.update_decoration_cursor(canvas_pos);
         self.update_pointer_constraint(old_focus);
+        self.focus_workspace_mru_if_empty_pointer(canvas_pos);
     }
 
     fn on_pointer_motion_absolute<I: InputBackend>(
@@ -413,6 +471,7 @@ impl DriftWm {
         self.update_decoration_cursor(canvas_pos);
         self.update_pointer_constraint(old_focus);
         self.maybe_hover_focus(canvas_pos);
+        self.focus_workspace_mru_if_empty_pointer(canvas_pos);
     }
 
     /// Handle relative pointer motion (libinput mice/trackpads).

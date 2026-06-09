@@ -461,6 +461,8 @@ pub struct DriftWm {
 
     pub focus_history: Vec<Window>,
     pub cycle_state: Option<usize>,
+    pub active_border_window: Option<smithay::reexports::wayland_server::backend::ObjectId>,
+    pub active_border_started_at: Instant,
 
     pub held_action: Option<(u32, driftwm::config::Action, Instant)>,
 
@@ -1153,7 +1155,7 @@ impl DriftWm {
         let focus = keyboard.current_focus()?;
         self.space
             .elements()
-            .find(|w| w.wl_surface().as_deref() == Some(&focus.0))
+            .find(|w| crate::surface_tree::focus_belongs_to_window(&focus.0, w))
             .cloned()
     }
 

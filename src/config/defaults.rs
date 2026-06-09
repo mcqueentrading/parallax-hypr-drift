@@ -317,6 +317,13 @@ pub(super) fn default_bindings(
         (
             KeyCombo {
                 modifiers: m.clone(),
+                sym: Keysym::from(keysyms::KEY_j),
+            },
+            Action::ToggleDwindleSplit,
+        ),
+        (
+            KeyCombo {
+                modifiers: m.clone(),
                 sym: Keysym::from(keysyms::KEY_t),
             },
             Action::TileCurrentWorkspace,

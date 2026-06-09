@@ -63,6 +63,7 @@ use smithay::{
         xwayland_keyboard_grab::XWaylandKeyboardGrabHandler,
     },
 };
+use std::time::Instant;
 
 impl SeatHandler for DriftWm {
     type KeyboardFocus = FocusTarget;
@@ -116,6 +117,18 @@ impl SeatHandler for DriftWm {
         {
             self.update_focus_history(&focus.0);
         }
+
+        let focused_window_id = focused.and_then(|focus| {
+            self.space
+                .elements()
+                .find(|window| crate::surface_tree::focus_belongs_to_window(&focus.0, window))
+                .and_then(|window| window.wl_surface().map(|surface| surface.id()))
+        });
+        if self.active_border_window != focused_window_id {
+            self.active_border_window = focused_window_id;
+            self.active_border_started_at = Instant::now();
+        }
+        self.mark_all_dirty();
     }
 }
 
@@ -491,6 +504,7 @@ impl XdgDialogHandler for DriftWm {
             let wl_surface = toplevel.wl_surface().clone();
             let window = self.window_for_surface(&wl_surface);
             if let Some(window) = window {
+                self.float_window_and_retile_workspace(&window);
                 let serial = smithay::utils::SERIAL_COUNTER.next_serial();
                 self.raise_and_focus(&window, serial);
             }

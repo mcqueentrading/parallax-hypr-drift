@@ -7,6 +7,7 @@ use super::DriftWm;
 use driftwm::config::WorkspaceLayout;
 
 pub type WorkspaceId = u8;
+pub type DwindleNodeId = u64;
 
 const WORKSPACE_WIDTH: i32 = 1920;
 const WORKSPACE_HEIGHT: i32 = 1080;
@@ -17,6 +18,33 @@ pub struct WorkspaceState {
     pub rect: Rectangle<i32, Logical>,
     pub windows: HashSet<ObjectId>,
     pub tile_rects: HashMap<ObjectId, Rectangle<i32, Logical>>,
+    pub dwindle_root: Option<DwindleNodeId>,
+    pub dwindle_nodes: HashMap<DwindleNodeId, DwindleNode>,
+    pub next_dwindle_node: DwindleNodeId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DwindleSplit {
+    Vertical,
+    Horizontal,
+}
+
+impl DwindleSplit {
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Vertical => Self::Horizontal,
+            Self::Horizontal => Self::Vertical,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DwindleNode {
+    pub parent: Option<DwindleNodeId>,
+    pub window: Option<ObjectId>,
+    pub children: Option<(DwindleNodeId, DwindleNodeId)>,
+    pub split: DwindleSplit,
+    pub ratio: f32,
 }
 
 impl WorkspaceState {
@@ -25,7 +53,17 @@ impl WorkspaceState {
             rect,
             windows: HashSet::new(),
             tile_rects: HashMap::new(),
+            dwindle_root: None,
+            dwindle_nodes: HashMap::new(),
+            next_dwindle_node: 1,
         }
+    }
+
+    pub fn alloc_dwindle_node(&mut self, node: DwindleNode) -> DwindleNodeId {
+        let id = self.next_dwindle_node;
+        self.next_dwindle_node += 1;
+        self.dwindle_nodes.insert(id, node);
+        id
     }
 }
 
@@ -131,6 +169,7 @@ impl DriftWm {
         for workspace in self.workspaces.values_mut() {
             workspace.windows.remove(&id);
             workspace.tile_rects.remove(&id);
+            crate::state::tile::remove_dwindle_window(workspace, &id);
         }
         if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
             workspace.windows.insert(id);

@@ -61,6 +61,7 @@ pub enum Action {
     FitWindow,
     FitWindowSnapped,
     ToggleFloating,
+    ToggleDwindleSplit,
     TileCurrentWorkspace,
     SendToOutput(Direction),
     FocusOutput(u8),

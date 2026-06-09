@@ -294,6 +294,8 @@ impl DriftWm {
             active_workspace: 1,
             focus_history: Vec::new(),
             cycle_state: None,
+            active_border_window: None,
+            active_border_started_at: Instant::now(),
             held_action: None,
             suppressed_keys: HashSet::new(),
             gesture_state: None,

@@ -5,7 +5,262 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 use std::time::Instant;
 
-use super::{DriftWm, FocusTarget, WorkspaceId};
+use super::{
+    DriftWm, FocusTarget, WorkspaceId,
+    workspace::{DwindleNode, DwindleNodeId, DwindleSplit, WorkspaceState},
+};
+
+const MIN_DWINDLE_TILE_WIDTH: i32 = 600;
+const MIN_DWINDLE_TILE_HEIGHT: i32 = 360;
+
+pub(crate) fn remove_dwindle_window(workspace: &mut WorkspaceState, id: &ObjectId) {
+    let Some(leaf_id) = find_dwindle_leaf(workspace, id) else {
+        return;
+    };
+
+    let parent_id = workspace
+        .dwindle_nodes
+        .get(&leaf_id)
+        .and_then(|node| node.parent);
+    let Some(parent_id) = parent_id else {
+        workspace.dwindle_nodes.remove(&leaf_id);
+        workspace.dwindle_root = None;
+        return;
+    };
+
+    let Some(parent) = workspace.dwindle_nodes.get(&parent_id).cloned() else {
+        workspace.dwindle_nodes.remove(&leaf_id);
+        return;
+    };
+    let Some((left, right)) = parent.children else {
+        workspace.dwindle_nodes.remove(&leaf_id);
+        return;
+    };
+    let sibling_id = if left == leaf_id { right } else { left };
+    let grandparent_id = parent.parent;
+
+    if let Some(grandparent_id) = grandparent_id {
+        if let Some(grandparent) = workspace.dwindle_nodes.get_mut(&grandparent_id)
+            && let Some((gleft, gright)) = grandparent.children
+        {
+            grandparent.children = Some(if gleft == parent_id {
+                (sibling_id, gright)
+            } else {
+                (gleft, sibling_id)
+            });
+        }
+        if let Some(sibling) = workspace.dwindle_nodes.get_mut(&sibling_id) {
+            sibling.parent = Some(grandparent_id);
+        }
+    } else {
+        workspace.dwindle_root = Some(sibling_id);
+        if let Some(sibling) = workspace.dwindle_nodes.get_mut(&sibling_id) {
+            sibling.parent = None;
+        }
+    }
+
+    workspace.dwindle_nodes.remove(&leaf_id);
+    workspace.dwindle_nodes.remove(&parent_id);
+}
+
+fn find_dwindle_leaf(workspace: &WorkspaceState, id: &ObjectId) -> Option<DwindleNodeId> {
+    workspace.dwindle_nodes.iter().find_map(|(node_id, node)| {
+        (node.children.is_none() && node.window.as_ref() == Some(id)).then_some(*node_id)
+    })
+}
+
+fn find_dwindle_leaf_at_point(
+    workspace: &WorkspaceState,
+    point: Point<i32, Logical>,
+) -> Option<DwindleNodeId> {
+    workspace.tile_rects.iter().find_map(|(id, rect)| {
+        rect.contains(point)
+            .then(|| find_dwindle_leaf(workspace, id))
+            .flatten()
+    })
+}
+
+fn split_from_rect(rect: Rectangle<i32, Logical>, gap: i32) -> DwindleSplit {
+    let can_vertical = rect.size.w - gap >= MIN_DWINDLE_TILE_WIDTH * 2;
+    let can_horizontal = rect.size.h - gap >= MIN_DWINDLE_TILE_HEIGHT * 2;
+    if can_vertical && (!can_horizontal || rect.size.w >= rect.size.h) {
+        DwindleSplit::Vertical
+    } else {
+        DwindleSplit::Horizontal
+    }
+}
+
+fn rect_can_dwindle_split(rect: Rectangle<i32, Logical>, gap: i32) -> bool {
+    (rect.size.w - gap >= MIN_DWINDLE_TILE_WIDTH * 2)
+        || (rect.size.h - gap >= MIN_DWINDLE_TILE_HEIGHT * 2)
+}
+
+fn split_rect(
+    rect: Rectangle<i32, Logical>,
+    gap: i32,
+    split: DwindleSplit,
+    ratio: f32,
+) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
+    let ratio = ratio.clamp(0.15, 0.85);
+    match split {
+        DwindleSplit::Vertical => {
+            let available = (rect.size.w - gap).max(2);
+            let first_w = ((available as f32) * ratio).round() as i32;
+            let second_w = available - first_w;
+            (
+                Rectangle::new(rect.loc, Size::from((first_w, rect.size.h))),
+                Rectangle::new(
+                    Point::from((rect.loc.x + first_w + gap, rect.loc.y)),
+                    Size::from((second_w, rect.size.h)),
+                ),
+            )
+        }
+        DwindleSplit::Horizontal => {
+            let available = (rect.size.h - gap).max(2);
+            let first_h = ((available as f32) * ratio).round() as i32;
+            let second_h = available - first_h;
+            (
+                Rectangle::new(rect.loc, Size::from((rect.size.w, first_h))),
+                Rectangle::new(
+                    Point::from((rect.loc.x, rect.loc.y + first_h + gap)),
+                    Size::from((rect.size.w, second_h)),
+                ),
+            )
+        }
+    }
+}
+
+fn calculate_dwindle_rects(
+    workspace: &WorkspaceState,
+    node_id: DwindleNodeId,
+    rect: Rectangle<i32, Logical>,
+    gap: i32,
+    out: &mut std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
+) {
+    let Some(node) = workspace.dwindle_nodes.get(&node_id) else {
+        return;
+    };
+    if let Some(id) = node.window.as_ref() {
+        out.insert(id.clone(), rect);
+        return;
+    }
+
+    let Some((left, right)) = node.children else {
+        return;
+    };
+    let (left_rect, right_rect) = split_rect(rect, gap, node.split, node.ratio);
+    calculate_dwindle_rects(workspace, left, left_rect, gap, out);
+    calculate_dwindle_rects(workspace, right, right_rect, gap, out);
+}
+
+fn insert_dwindle_window(
+    workspace: &mut WorkspaceState,
+    id: ObjectId,
+    anchor_id: Option<ObjectId>,
+    pointer: Option<Point<i32, Logical>>,
+    gap: i32,
+) {
+    if find_dwindle_leaf(workspace, &id).is_some() {
+        return;
+    }
+
+    let new_leaf = DwindleNode {
+        parent: None,
+        window: Some(id.clone()),
+        children: None,
+        split: DwindleSplit::Vertical,
+        ratio: 0.5,
+    };
+
+    let Some(root_id) = workspace.dwindle_root else {
+        let node_id = workspace.alloc_dwindle_node(new_leaf);
+        workspace.dwindle_root = Some(node_id);
+        return;
+    };
+
+    let requested_anchor_leaf = anchor_id
+        .as_ref()
+        .and_then(|id| find_dwindle_leaf(workspace, id))
+        .or_else(|| pointer.and_then(|point| find_dwindle_leaf_at_point(workspace, point)))
+        .or_else(|| {
+            workspace
+                .tile_rects
+                .iter()
+                .max_by_key(|(_, rect)| rect.size.w.saturating_mul(rect.size.h))
+                .and_then(|(id, _)| find_dwindle_leaf(workspace, id))
+        })
+        .unwrap_or(root_id);
+
+    let requested_anchor_rect = workspace
+        .dwindle_nodes
+        .get(&requested_anchor_leaf)
+        .and_then(|node| node.window.as_ref())
+        .and_then(|id| workspace.tile_rects.get(id).cloned())
+        .unwrap_or(workspace.rect);
+    let anchor_leaf = if rect_can_dwindle_split(requested_anchor_rect, gap) {
+        requested_anchor_leaf
+    } else {
+        workspace
+            .tile_rects
+            .iter()
+            .filter(|(_, rect)| rect_can_dwindle_split(**rect, gap))
+            .max_by_key(|(_, rect)| rect.size.w.saturating_mul(rect.size.h))
+            .and_then(|(id, _)| find_dwindle_leaf(workspace, id))
+            .unwrap_or(requested_anchor_leaf)
+    };
+
+    let anchor_rect = workspace
+        .dwindle_nodes
+        .get(&anchor_leaf)
+        .and_then(|node| node.window.as_ref())
+        .and_then(|id| workspace.tile_rects.get(id).cloned())
+        .unwrap_or(workspace.rect);
+    let split = split_from_rect(anchor_rect, gap);
+    let parent_of_anchor = workspace
+        .dwindle_nodes
+        .get(&anchor_leaf)
+        .and_then(|node| node.parent);
+
+    let new_leaf_id = workspace.alloc_dwindle_node(new_leaf);
+    let pointer_first = pointer.is_some_and(|point| match split {
+        DwindleSplit::Vertical => point.x < anchor_rect.loc.x + anchor_rect.size.w / 2,
+        DwindleSplit::Horizontal => point.y < anchor_rect.loc.y + anchor_rect.size.h / 2,
+    });
+    let children = if pointer_first {
+        (new_leaf_id, anchor_leaf)
+    } else {
+        (anchor_leaf, new_leaf_id)
+    };
+
+    let parent_id = workspace.alloc_dwindle_node(DwindleNode {
+        parent: parent_of_anchor,
+        window: None,
+        children: Some(children),
+        split,
+        ratio: 0.5,
+    });
+
+    if let Some(anchor) = workspace.dwindle_nodes.get_mut(&anchor_leaf) {
+        anchor.parent = Some(parent_id);
+    }
+    if let Some(new) = workspace.dwindle_nodes.get_mut(&new_leaf_id) {
+        new.parent = Some(parent_id);
+    }
+
+    if let Some(old_parent_id) = parent_of_anchor {
+        if let Some(old_parent) = workspace.dwindle_nodes.get_mut(&old_parent_id)
+            && let Some((left, right)) = old_parent.children
+        {
+            old_parent.children = Some(if left == anchor_leaf {
+                (parent_id, right)
+            } else {
+                (left, parent_id)
+            });
+        }
+    } else {
+        workspace.dwindle_root = Some(parent_id);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct TiledUnmapState {
@@ -37,119 +292,9 @@ impl DriftWm {
             workspace.tile_rects.remove(id);
             if remove_membership {
                 workspace.windows.remove(id);
+                remove_dwindle_window(workspace, id);
             }
         }
-    }
-
-    fn apply_workspace_tile_rects(&mut self, workspace_id: WorkspaceId) {
-        let Some(workspace) = self.workspaces.get(&workspace_id) else {
-            return;
-        };
-        let tile_rects = workspace.tile_rects.clone();
-        if tile_rects.is_empty() {
-            return;
-        }
-
-        let windows: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|window| self.is_tiling_candidate(window))
-            .filter(|window| {
-                Self::window_object_id(window)
-                    .as_ref()
-                    .is_some_and(|id| tile_rects.contains_key(id))
-            })
-            .cloned()
-            .collect();
-
-        let mut configured = 0usize;
-        let mut remapped = 0usize;
-        for window in &windows {
-            let Some(id) = Self::window_object_id(window) else {
-                continue;
-            };
-            let Some(rect) = tile_rects.get(&id).cloned() else {
-                continue;
-            };
-            let already_tiled = self.space.element_location(window) == Some(rect.loc)
-                && window.geometry().size == rect.size;
-
-            if let Some(toplevel) = window.toplevel() {
-                crate::handlers::set_tiled_states(&toplevel);
-                if !already_tiled {
-                    toplevel.with_pending_state(|state| {
-                        state.size = Some(rect.size);
-                    });
-                    toplevel.send_configure();
-                    configured += 1;
-                }
-            }
-            if !already_tiled {
-                self.space.map_element(window.clone(), rect.loc, false);
-                remapped += 1;
-            }
-        }
-        self.sync_pointer_focus_under_cursor();
-        self.mark_all_dirty();
-        crate::diagnostics::log(format!(
-            "tile:apply_existing workspace={workspace_id} windows={} configured={configured} remapped={remapped}",
-            windows.len()
-        ));
-    }
-
-    fn merge_removed_tile_into_sibling(
-        &mut self,
-        workspace_id: WorkspaceId,
-        removed_rect: Rectangle<i32, Logical>,
-    ) -> bool {
-        let gap = self.config.snap_gap.max(0.0).round() as i32;
-        let Some(workspace) = self.workspaces.get_mut(&workspace_id) else {
-            return false;
-        };
-
-        let mut best: Option<(ObjectId, Rectangle<i32, Logical>, i32)> = None;
-        for (id, rect) in &workspace.tile_rects {
-            let horizontal_neighbor = rect.loc.y == removed_rect.loc.y
-                && rect.size.h == removed_rect.size.h
-                && (rect.loc.x + rect.size.w + gap == removed_rect.loc.x
-                    || removed_rect.loc.x + removed_rect.size.w + gap == rect.loc.x);
-            let vertical_neighbor = rect.loc.x == removed_rect.loc.x
-                && rect.size.w == removed_rect.size.w
-                && (rect.loc.y + rect.size.h + gap == removed_rect.loc.y
-                    || removed_rect.loc.y + removed_rect.size.h + gap == rect.loc.y);
-
-            if !horizontal_neighbor && !vertical_neighbor {
-                continue;
-            }
-
-            let min_x = rect.loc.x.min(removed_rect.loc.x);
-            let min_y = rect.loc.y.min(removed_rect.loc.y);
-            let max_x = (rect.loc.x + rect.size.w).max(removed_rect.loc.x + removed_rect.size.w);
-            let max_y = (rect.loc.y + rect.size.h).max(removed_rect.loc.y + removed_rect.size.h);
-            let merged = Rectangle::new(
-                Point::from((min_x, min_y)),
-                Size::from((max_x - min_x, max_y - min_y)),
-            );
-            let area = rect.size.w.saturating_mul(rect.size.h);
-            if best
-                .as_ref()
-                .is_none_or(|(_, _, best_area)| area > *best_area)
-            {
-                best = Some((id.clone(), merged, area));
-            }
-        }
-
-        let Some((sibling_id, merged, _)) = best else {
-            return false;
-        };
-
-        workspace.tile_rects.insert(sibling_id.clone(), merged);
-        self.tile_rects.insert(sibling_id.clone(), merged);
-        crate::diagnostics::log(format!(
-            "tile:merge_removed workspace={workspace_id} sibling={sibling_id:?} merged=({}, {}) {}x{}",
-            merged.loc.x, merged.loc.y, merged.size.w, merged.size.h
-        ));
-        true
     }
 
     fn focus_nearest_tiled_after_unmap(
@@ -224,15 +369,19 @@ impl DriftWm {
             rect.loc.x, rect.loc.y, rect.size.w, rect.size.h
         ));
         if let Some(toplevel) = window.toplevel() {
+            crate::diagnostics::log(format!("tile:snap_existing_configure_begin id={id:?}"));
             crate::handlers::set_tiled_states(&toplevel);
             toplevel.with_pending_state(|state| {
                 state.size = Some(rect.size);
             });
             toplevel.send_configure();
+            crate::diagnostics::log(format!("tile:snap_existing_configure_done id={id:?}"));
         }
+        crate::diagnostics::log(format!("tile:snap_existing_map_begin id={id:?}"));
         self.space.map_element(window.clone(), rect.loc, false);
-        self.sync_pointer_focus_under_cursor();
+        crate::diagnostics::log(format!("tile:snap_existing_map_done id={id:?}"));
         self.mark_all_dirty();
+        crate::diagnostics::log(format!("tile:snap_existing_done id={id:?}"));
         true
     }
 
@@ -441,6 +590,19 @@ impl DriftWm {
         })
     }
 
+    pub fn float_window_and_retile_workspace(&mut self, window: &Window) {
+        let Some(id) = Self::window_object_id(window) else {
+            return;
+        };
+        let source_workspace = self.workspace_for_window_id(&id);
+        self.floating_windows.insert(id.clone());
+        self.purge_workspace_tile_state(&id, true);
+        if let Some(workspace_id) = source_workspace {
+            self.tile_workspace(workspace_id, false);
+        }
+        self.mark_all_dirty();
+    }
+
     pub fn retile_after_window_unmap(&mut self, unmap_state: Option<TiledUnmapState>) {
         let Some(unmap_state) = unmap_state else {
             crate::diagnostics::log("tile:retile_after_unmap skip=no_workspace");
@@ -454,17 +616,9 @@ impl DriftWm {
             self.active_workspace
         ));
         let removed_rect = unmap_state.removed_rect;
-        if let Some(removed_rect) = removed_rect
-            && self.merge_removed_tile_into_sibling(workspace_id, removed_rect)
-        {
-            self.apply_workspace_tile_rects(workspace_id);
-            self.focus_nearest_tiled_after_unmap(workspace_id, removed_rect);
-            if self.in_workspace_perspective() && workspace_id == self.active_workspace {
-                self.stabilize_tiled_workspace_view();
-            }
-            return;
-        }
-
+        // Hyprland-style dwindle removal: prepare_tiled_window_unmap() already
+        // promotes the sibling in the tree, so the close path must recalculate
+        // from that tree instead of merging stale rectangles by hand.
         self.tile_workspace(workspace_id, false);
         if let Some(removed_rect) = removed_rect {
             self.focus_nearest_tiled_after_unmap(workspace_id, removed_rect);
@@ -523,6 +677,57 @@ impl DriftWm {
         for id in ids {
             workspace.windows.insert(id);
         }
+
+        self.tile_workspace(workspace_id, false);
+        if self.in_workspace_perspective() {
+            self.stabilize_tiled_workspace_view();
+        }
+    }
+
+    pub fn toggle_dwindle_split_current_workspace(&mut self) {
+        if let Some(workspace_id) = self.workspace_at_pointer() {
+            self.active_workspace = workspace_id;
+        } else {
+            self.sync_active_workspace_from_pointer();
+        }
+
+        let workspace_id = self.active_workspace;
+        let target_id = self
+            .hovered_or_focused_window()
+            .and_then(|window| Self::window_object_id(&window));
+        let Some(workspace) = self.workspaces.get_mut(&workspace_id) else {
+            return;
+        };
+
+        let leaf_id = target_id
+            .as_ref()
+            .and_then(|id| find_dwindle_leaf(workspace, id))
+            .or_else(|| workspace.dwindle_root);
+        let Some(parent_id) = leaf_id.and_then(|leaf| {
+            workspace
+                .dwindle_nodes
+                .get(&leaf)
+                .and_then(|node| node.parent)
+        }) else {
+            crate::diagnostics::log(format!(
+                "tile:toggle_dwindle_split_skip workspace={workspace_id} reason=no_parent"
+            ));
+            return;
+        };
+
+        let split = if let Some(parent) = workspace.dwindle_nodes.get_mut(&parent_id) {
+            parent.split = parent.split.toggled();
+            parent.split
+        } else {
+            return;
+        };
+        let split_name = match split {
+            DwindleSplit::Vertical => "vertical",
+            DwindleSplit::Horizontal => "horizontal",
+        };
+        crate::diagnostics::log(format!(
+            "tile:toggle_dwindle_split workspace={workspace_id} parent={parent_id} split={split_name}"
+        ));
 
         self.tile_workspace(workspace_id, false);
         if self.in_workspace_perspective() {
@@ -606,94 +811,6 @@ impl DriftWm {
         let camera = Point::from((center.x - vc.x / zoom, center.y - vc.y / zoom));
         self.set_camera(camera);
         self.update_output_from_camera();
-    }
-
-    fn split_rect_for_new_window(
-        rect: Rectangle<i32, Logical>,
-        gap: i32,
-        pointer: Option<Point<i32, Logical>>,
-    ) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
-        let pointer_in_first_half = |horizontal: bool| {
-            pointer.is_some_and(|pos| {
-                if horizontal {
-                    pos.x < rect.loc.x + rect.size.w / 2
-                } else {
-                    pos.y < rect.loc.y + rect.size.h / 2
-                }
-            })
-        };
-
-        if rect.size.w >= rect.size.h {
-            let first_w = ((rect.size.w - gap) / 2).max(80);
-            let second_w = (rect.size.w - first_w - gap).max(80);
-            let first = Rectangle::new(rect.loc, Size::from((first_w, rect.size.h)));
-            let second = Rectangle::new(
-                Point::from((rect.loc.x + first_w + gap, rect.loc.y)),
-                Size::from((second_w, rect.size.h)),
-            );
-            if pointer_in_first_half(true) {
-                (second, first)
-            } else {
-                (first, second)
-            }
-        } else {
-            let first_h = ((rect.size.h - gap) / 2).max(80);
-            let second_h = (rect.size.h - first_h - gap).max(80);
-            let first = Rectangle::new(rect.loc, Size::from((rect.size.w, first_h)));
-            let second = Rectangle::new(
-                Point::from((rect.loc.x, rect.loc.y + first_h + gap)),
-                Size::from((rect.size.w, second_h)),
-            );
-            if pointer_in_first_half(false) {
-                (second, first)
-            } else {
-                (first, second)
-            }
-        }
-    }
-
-    fn largest_tiled_window(
-        &self,
-        windows: &[Window],
-        tile_rects: &std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
-    ) -> Option<ObjectId> {
-        windows
-            .iter()
-            .filter_map(|window| {
-                let id = Self::window_object_id(window)?;
-                let rect = tile_rects.get(&id)?;
-                Some((id, rect.size.w.saturating_mul(rect.size.h)))
-            })
-            .max_by_key(|(_, area)| *area)
-            .map(|(id, _)| id)
-    }
-
-    fn pointer_tiled_window(
-        &self,
-        windows: &[Window],
-        tile_rects: &std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
-    ) -> Option<ObjectId> {
-        let pointer = self.seat.get_pointer()?;
-        let pos = pointer.current_location().to_i32_round::<i32>();
-        windows.iter().find_map(|window| {
-            let id = Self::window_object_id(window)?;
-            let rect = tile_rects.get(&id)?;
-            rect.contains(pos).then_some(id)
-        })
-    }
-
-    fn focused_tiled_window(
-        &self,
-        windows: &[Window],
-        tile_rects: &std::collections::HashMap<ObjectId, Rectangle<i32, Logical>>,
-    ) -> Option<ObjectId> {
-        let focused = self.focused_window()?;
-        let focused_id = Self::window_object_id(&focused)?;
-        windows
-            .iter()
-            .filter_map(Self::window_object_id)
-            .any(|id| id == focused_id && tile_rects.contains_key(&id))
-            .then_some(focused_id)
     }
 
     pub fn tile_windows(&mut self) {
@@ -817,51 +934,53 @@ impl DriftWm {
         ));
         let full_area = self.workspace_tile_area(workspace_id);
         let gap = self.config.snap_gap.max(0.0).round() as i32;
-        // Rebuild the active workspace tree from current tiled membership.
-        // This mirrors Hyprland's remove/reinsert/recalculate behavior and
-        // guarantees the remaining windows expand after a float toggle.
-        let mut next_tile_rects = std::collections::HashMap::new();
-        let new_ids = active_window_ids;
+        let pointer = self
+            .seat
+            .get_pointer()
+            .map(|pointer| pointer.current_location().to_i32_round::<i32>());
 
-        for new_id in new_ids {
-            crate::diagnostics::log(format!(
-                "tile:workspace_phase workspace={workspace_id} phase=place id={new_id:?} placed={}",
-                next_tile_rects.len()
-            ));
-            if next_tile_rects.is_empty() {
-                next_tile_rects.insert(new_id, full_area);
-                continue;
+        let active_ids = active_window_ids;
+        let pending_anchors: std::collections::HashMap<ObjectId, Option<ObjectId>> = active_ids
+            .iter()
+            .map(|id| (id.clone(), self.pending_tile_anchors.remove(id)))
+            .collect();
+
+        let mut next_tile_rects = std::collections::HashMap::new();
+        if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
+            let existing_leaf_ids: Vec<ObjectId> = workspace
+                .dwindle_nodes
+                .values()
+                .filter_map(|node| node.window.clone())
+                .filter(|id| !active_ids.iter().any(|active_id| active_id == id))
+                .collect();
+            for id in existing_leaf_ids {
+                remove_dwindle_window(workspace, &id);
             }
 
-            let anchor_id = self
-                .pending_tile_anchors
-                .remove(&new_id)
-                .filter(|id| next_tile_rects.contains_key(id))
-                .or_else(|| self.pointer_tiled_window(&windows, &next_tile_rects))
-                .or_else(|| self.focused_tiled_window(&windows, &next_tile_rects))
-                .or_else(|| self.largest_tiled_window(&windows, &next_tile_rects));
+            workspace.tile_rects.clear();
+            if let Some(root) = workspace.dwindle_root {
+                let mut calculated = std::collections::HashMap::new();
+                calculate_dwindle_rects(workspace, root, full_area, gap, &mut calculated);
+                workspace.tile_rects = calculated;
+            }
 
-            let Some(anchor_id) = anchor_id else {
-                next_tile_rects.insert(new_id, full_area);
-                continue;
-            };
-            let Some(anchor_rect) = next_tile_rects.get(&anchor_id).cloned() else {
-                next_tile_rects.insert(new_id, full_area);
-                continue;
-            };
+            for new_id in &active_ids {
+                if find_dwindle_leaf(workspace, new_id).is_some() {
+                    continue;
+                }
+                crate::diagnostics::log(format!(
+                    "tile:workspace_phase workspace={workspace_id} phase=tree_insert id={new_id:?}"
+                ));
+                let anchor = pending_anchors.get(new_id).and_then(|id| id.clone());
+                insert_dwindle_window(workspace, new_id.clone(), anchor, pointer, gap);
+                if let Some(root) = workspace.dwindle_root {
+                    let mut calculated = std::collections::HashMap::new();
+                    calculate_dwindle_rects(workspace, root, full_area, gap, &mut calculated);
+                    workspace.tile_rects = calculated;
+                }
+            }
 
-            let pointer = self
-                .seat
-                .get_pointer()
-                .map(|pointer| pointer.current_location().to_i32_round::<i32>());
-            let (anchor_new_rect, new_rect) =
-                Self::split_rect_for_new_window(anchor_rect, gap, pointer);
-            next_tile_rects.insert(anchor_id, anchor_new_rect);
-            next_tile_rects.insert(new_id, new_rect);
-        }
-
-        if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
-            workspace.tile_rects = next_tile_rects.clone();
+            next_tile_rects = workspace.tile_rects.clone();
         }
         crate::diagnostics::log(format!(
             "tile:workspace_phase workspace={workspace_id} phase=rects rects={}",
@@ -882,6 +1001,18 @@ impl DriftWm {
             let current_loc = self.space.element_location(window);
             let current_size = window.geometry().size;
             let already_tiled = current_loc == Some(loc) && current_size == size;
+            crate::diagnostics::log(format!(
+                "tile:rect workspace={workspace_id} id={id:?} app={:?} title={:?} target=({}, {}) {}x{} current_loc={:?} current_size={}x{} already={already_tiled}",
+                window.app_id_or_class(),
+                window.window_title(),
+                loc.x,
+                loc.y,
+                size.w,
+                size.h,
+                current_loc,
+                current_size.w,
+                current_size.h
+            ));
 
             if let Some(toplevel) = window.toplevel() {
                 crate::handlers::set_tiled_states(&toplevel);
